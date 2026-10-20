@@ -19,6 +19,13 @@ test-results.json
 TestResults/
 *.log
 
+# Python test caches and coverage output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+coverage/
+
 # Temporary files and backups
 *.part
 *.tmp
