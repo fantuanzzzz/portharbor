@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+artifacts/
+.vs/
+.packages/
+.build-home/
+*.user
+*.part
+settings.json*
+test-results.json
