@@ -1,10 +1,32 @@
+# .NET build output
 **/bin/
 **/obj/
 artifacts/
-.vs/
-.packages/
 .build-home/
+.packages/
+
+# IDE and editor state
+.vs/
+.idea/
 *.user
-*.part
+*.userosscache
+*.suo
+*.sln.docstates
+
+# Local configuration and generated test data
 settings.json*
 test-results.json
+TestResults/
+*.log
+
+# Temporary files and backups
+*.part
+*.tmp
+*.temp
+*.bak
+*.cache
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini

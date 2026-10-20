@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text;
 
-namespace EasyConnect;
+namespace PortHarbor;
 
 public sealed class TerminalView : Control
 {

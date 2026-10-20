@@ -1,4 +1,4 @@
-namespace EasyConnect;
+namespace PortHarbor;
 
 internal static class Program
 {
@@ -17,3 +17,4 @@ internal static class Program
         catch (Exception e) { MessageBox.Show("启动失败，原配置文件已保留。\n" + e.Message, "PortHarbor", MessageBoxButtons.OK, MessageBoxIcon.Error); }
     }
 }
+

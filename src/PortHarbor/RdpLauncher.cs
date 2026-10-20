@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 
-namespace EasyConnect;
+namespace PortHarbor;
 
 public static class RdpLauncher
 {

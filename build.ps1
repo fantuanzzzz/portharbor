@@ -7,8 +7,8 @@ New-Item -ItemType Directory -Force $env:APPDATA | Out-Null
 
 $version = '0.1.0'
 $rid = 'win-x64'
-$project = Join-Path $PSScriptRoot 'src\EasyConnect\EasyConnect.csproj'
-$checks = Join-Path $PSScriptRoot 'tests\EasyConnect.Checks\EasyConnect.Checks.csproj'
+$project = Join-Path $PSScriptRoot 'src\PortHarbor\PortHarbor.csproj'
+$checks = Join-Path $PSScriptRoot 'tests\PortHarbor.Checks\PortHarbor.Checks.csproj'
 $artifacts = Join-Path $PSScriptRoot 'artifacts'
 $portable = Join-Path $artifacts 'portable-win-x64'
 $framework = Join-Path $artifacts 'framework-win-x64'

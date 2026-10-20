@@ -5,7 +5,7 @@ using System.Text;
 using System.Threading.Channels;
 using Renci.SshNet;
 
-namespace EasyConnect;
+namespace PortHarbor;
 
 public sealed class TerminalConnection : IDisposable
 {

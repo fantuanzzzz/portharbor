@@ -1,4 +1,4 @@
-namespace EasyConnect;
+namespace PortHarbor;
 
 // Incremental IAC parser. State persists across TCP packets.
 public sealed class TelnetCodec(Action<byte[]> reply)

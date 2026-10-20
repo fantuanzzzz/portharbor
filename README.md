@@ -37,7 +37,7 @@ RDP 在系统窗口中打开，登录由 Windows 客户端处理。PortHarbor �
 
 ## 数据与密码
 
-默认配置：`%LOCALAPPDATA%\PortHarbor\settings.json`。首次启动时，如果发现 `%LOCALAPPDATA%\EasyConnect\settings.json` 且新目录尚无配置，会迁移旧配置。工具栏「配置目录」可以打开所在文件夹。写入采用临时文件加原子替换，`.bak` 保留前一次配置（其中也可能包含旧的加密密码）。损坏配置会被保留并报告错误，不会静默覆盖。
+默认配置：`%LOCALAPPDATA%\PortHarbor\settings.json`。首次启动时，如果发现旧版 `%LOCALAPPDATA%\EasyConnect\settings.json` 且新目录尚无配置，会自动迁移旧配置。工具栏「配置目录」可以打开所在文件夹。写入采用临时文件加原子替换，`.bak` 保留前一次配置（其中也可能包含旧的加密密码）。损坏配置会被保留并报告错误，不会静默覆盖。
 
 密码由当前 Windows 用户的 DPAPI 保护，复制配置到另一账户或电脑通常不能解密。导出功能仅输出会话参数，不含加密密码或主机信任记录；导入会分配新 ID，并关闭保存密码选项。私钥文件由用户自行保管，配置只记录其路径。
 
@@ -74,11 +74,11 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 .\build.ps1 -Dotnet 'D:\Code\rea-work\tools\dotnet\dotnet.exe' -PackageSource 'D:\Code\rea-work\tools\nuget-feed'
 ```
 
-脚本在项目内缓存构建数据，恢复依赖、编译并执行检查，然后生成自包含和框架依赖两个 x64 发行 ZIP，放在 `artifacts`。自包含包把 .NET 运行环境打入单文件；框架依赖包附带 `Start-PortHarbor.cmd` 启动检测。运行时依赖版本与哈希记录在 `src\EasyConnect\packages.lock.json`。项目结构：
+脚本在项目内缓存构建数据，恢复依赖、编译并执行检查，然后生成自包含和框架依赖两个 x64 发行 ZIP，放在 `artifacts`。自包含包把 .NET 运行环境打入单文件；框架依赖包附带 `Start-PortHarbor.cmd` 启动检测。运行时依赖版本与哈希记录在 `src\PortHarbor\packages.lock.json`。项目结构：
 
 ```text
-src/EasyConnect/               界面、连接、终端及数据存储
-tests/EasyConnect.Checks/      无测试框架依赖的检查程序
+src/PortHarbor/                界面、连接、终端及数据存储
+tests/PortHarbor.Checks/        无测试框架依赖的检查程序
 tests/protocol_servers.py     仅监听本机的 FTP / SSH / SFTP 测试服务
 licenses/                     随包分发的第三方许可文本
 build.ps1                     构建和发布
@@ -93,7 +93,7 @@ RDP 验证覆盖配置生成，不含真实远程桌面登录；串口尚无实�
 基本检查可单独运行：
 
 ```powershell
-dotnet run --project tests/EasyConnect.Checks -c Release -- --results artifacts/check-results.json
+dotnet run --project tests/PortHarbor.Checks -c Release -- --results artifacts/check-results.json
 ```
 
 完整回环测试需要 Python 及测试专用依赖，应用本身不需要 Python：
@@ -103,11 +103,11 @@ python -m pip install -r tests/requirements.txt
 # 在第一个终端运行，结束后按 Ctrl+C
 python tests/protocol_servers.py --root artifacts/protocol-fixture
 # 在第二个终端运行
-dotnet run --project tests/EasyConnect.Checks -c Release -- --integration artifacts/protocol-fixture/servers.json --results artifacts/integration-results.json
+dotnet run --project tests/PortHarbor.Checks -c Release -- --integration artifacts/protocol-fixture/servers.json --results artifacts/integration-results.json
 ```
 
 测试使用固定的本机专用账号 `easytest` / `easytest-only`，服务仅绑定 `127.0.0.1`，操作限制在指定测试目录。
 
 ## 许可
 
-项目代码使用 MIT 许可证，见 `LICENSE`。依赖及其许可证见 `THIRD-PARTY-NOTICES.md` 与 `licenses/`。开源代码已提供，尚未发布到公共代码托管平台。
+项目代码使用 MIT 许可证，见 `LICENSE`。依赖及其许可证见 `THIRD-PARTY-NOTICES.md` 与 `licenses/`。项目源码已在 [GitHub](https://github.com/fantuanzzzz/portharbor) 公开发布。

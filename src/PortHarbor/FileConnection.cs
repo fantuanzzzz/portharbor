@@ -1,7 +1,7 @@
 using FluentFTP;
 using Renci.SshNet;
 
-namespace EasyConnect;
+namespace PortHarbor;
 
 public sealed record RemoteEntry(string Name, string Path, bool Directory, long Size, DateTime Modified);
 public sealed class FileConnection : IDisposable
@@ -37,7 +37,7 @@ public sealed class FileConnection : IDisposable
     }
     public static void CopyAtomically(Stream source, string destination, CancellationToken token, Action<long> progress)
     {
-        string temp = destination + ".easyconnect-" + Guid.NewGuid().ToString("N") + ".part";
+        string temp = destination + ".portharbor-" + Guid.NewGuid().ToString("N") + ".part";
         try
         {
             using (var target = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None)) Copy(source, target, token, progress);
@@ -48,7 +48,7 @@ public sealed class FileConnection : IDisposable
     public void Upload(string local, string remote, CancellationToken token, Action<long> progress)
     {
         // Upload to a distinct temporary name so cancellation never truncates the destination.
-        string temp = remote + ".easyconnect-" + Guid.NewGuid().ToString("N") + ".part";
+        string temp = remote + ".portharbor-" + Guid.NewGuid().ToString("N") + ".part";
         try
         {
             using (var source = File.OpenRead(local))
@@ -63,7 +63,7 @@ public sealed class FileConnection : IDisposable
                     catch (NotSupportedException)
                     {
                         // Servers without POSIX rename: retain the old file until replacement succeeds.
-                        string backup = remote + ".easyconnect-" + Guid.NewGuid().ToString("N") + ".bak";
+                        string backup = remote + ".portharbor-" + Guid.NewGuid().ToString("N") + ".bak";
                         sftp.RenameFile(remote, backup);
                         try { sftp.RenameFile(temp, remote); }
                         catch { if (!sftp.Exists(remote)) sftp.RenameFile(backup, remote); throw; }

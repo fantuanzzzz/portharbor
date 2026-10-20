@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace EasyConnect;
+namespace PortHarbor;
 
 public enum Protocol { SSH, Telnet, RDP, FTP, SFTP, Serial, Shell }
 public sealed record Session
@@ -65,6 +65,7 @@ public sealed class Store
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         DirectoryPath = directory ?? Path.Combine(localAppData, "PortHarbor");
         Directory.CreateDirectory(DirectoryPath);
+        // Keep the old directory as a one-time migration source for existing users.
         var legacySettings = Path.Combine(localAppData, "EasyConnect", "settings.json");
         if (directory == null && !File.Exists(FilePath) && File.Exists(legacySettings)) File.Copy(legacySettings, FilePath);
         Data = File.Exists(FilePath) ? Read(FilePath) : new();

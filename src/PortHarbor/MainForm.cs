@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace EasyConnect;
+namespace PortHarbor;
 
 public sealed class MainForm : Form
 {

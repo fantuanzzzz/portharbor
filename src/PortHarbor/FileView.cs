@@ -1,4 +1,4 @@
-namespace EasyConnect;
+namespace PortHarbor;
 
 public sealed class FileView : UserControl
 {

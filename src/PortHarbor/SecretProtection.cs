@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace EasyConnect;
+namespace PortHarbor;
 
 // Windows user-scoped DPAPI; no password or encryption key is stored in plaintext.
 public static class SecretProtection
@@ -20,7 +20,7 @@ public static class SecretProtection
         try
         {
             Marshal.Copy(value, 0, input.Data, value.Length);
-            var ok = protect ? CryptProtectData(ref input, "EasyConnect", IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, 1, out output)
+            var ok = protect ? CryptProtectData(ref input, "PortHarbor", IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, 1, out output)
                              : CryptUnprotectData(ref input, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, 1, out output);
             if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows DPAPI 操作失败。");
             var result = new byte[output.Length];

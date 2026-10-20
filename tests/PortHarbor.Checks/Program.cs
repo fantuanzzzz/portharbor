@@ -1,7 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using EasyConnect;
+using PortHarbor;
 
 internal static class Program
 {
@@ -11,7 +11,7 @@ internal static class Program
     [STAThread]
     static async Task<int> Main(string[] args)
     {
-        string root = Path.Combine(Path.GetTempPath(), "EasyConnect-check-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
+        string root = Path.Combine(Path.GetTempPath(), "PortHarbor-check-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
         try
         {
             if (args.Length > 0 && args[0] == "--ui") { Ui(root, args[1]); return 0; }
@@ -137,7 +137,7 @@ internal static class Program
     }
     static async Task Lifecycle(string root)
     {
-        using var connection = new TerminalConnection(new Session { Protocol = Protocol.Shell, Executable="no-such-easyconnect-program.exe" },new Store(Path.Combine(root,"invalid-shell")),"",_=>false);
+        using var connection = new TerminalConnection(new Session { Protocol = Protocol.Shell, Executable="no-such-portharbor-program.exe" },new Store(Path.Combine(root,"invalid-shell")),"",_=>false);
         bool failed=false; try { await connection.Run(80,24).WaitAsync(TimeSpan.FromSeconds(8)); } catch(System.ComponentModel.Win32Exception) { failed=true; }
         Check(failed,"invalid executable fails cleanly without leaked startup state");
     }

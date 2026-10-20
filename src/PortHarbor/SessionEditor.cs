@@ -1,6 +1,6 @@
 using System.IO.Ports;
 
-namespace EasyConnect;
+namespace PortHarbor;
 
 public sealed class SessionEditor : Form
 {

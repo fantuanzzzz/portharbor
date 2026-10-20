@@ -13,6 +13,6 @@ PortHarbor code is licensed under MIT. The following dependencies retain their o
 
 Framework-dependent releases require Microsoft .NET 8 Desktop Runtime, installed separately under its own license. Windows ConPTY, DPAPI, and the external Remote Desktop client are operating system components and are not redistributed here.
 
-License texts were extracted from the exact NuGet packages except SSH.NET, whose MIT license was retrieved from the upstream 2026.0.0 tag. Microsoft package third-party notices are also included. The complete dependency graph and integrity hashes are in `src/EasyConnect/packages.lock.json`.
+License texts were extracted from the exact NuGet packages except SSH.NET, whose MIT license was retrieved from the upstream 2026.0.0 tag. Microsoft package third-party notices are also included. The complete dependency graph and integrity hashes are in `src/PortHarbor/packages.lock.json`.
 
 Python paramiko, pyftpdlib and their dependencies are used solely for optional loopback tests. They are not included in the application or source archives as installed libraries. See each project's license when installing those tools separately.

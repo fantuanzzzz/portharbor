@@ -1,7 +1,7 @@
 using System.Drawing;
 using System.Text;
 
-namespace EasyConnect;
+namespace PortHarbor;
 
 public record struct Cell(string Text, Color Foreground, Color Background);
 public sealed class TerminalScreen
