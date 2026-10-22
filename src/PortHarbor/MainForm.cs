@@ -19,7 +19,7 @@ public sealed class MainForm : Form
         Button("＋ 新建连接", () => Edit(null)); Button("连接", ConnectSelected); Button("编辑", () => { if (Selected is { } s) Edit(s); });
         Button("关闭标签", CloseTab); toolbar.Items.Add(new ToolStripSeparator());
         Button("导入会话", Import); Button("导出会话", Export); Button("配置目录", () => Process.Start(new ProcessStartInfo("explorer.exe", store.DirectoryPath) { UseShellExecute = true }));
-        Button("关于", () => MessageBox.Show(this, "PortHarbor 0.1.0\nMIT 开源许可证\n\nSSH · Telnet · RDP · FTP · SFTP · Serial · Shell\n原生 WinForms 界面；UTF-8 基础 ANSI/VT 终端。\nRDP 使用 Windows 远程桌面客户端。\n\n源码、功能限制和第三方许可见发行包 README。", "关于 PortHarbor"));
+        Button("关于", () => MessageBox.Show(this, "PortHarbor 0.1.0 私有预览版\n尚未选择或发布开源许可证。\n\nSSH · Telnet · RDP · FTP · SFTP · Serial · Shell\n原生 WinForms 界面；UTF-8 基础 ANSI/VT 终端。\nRDP 使用 Windows 远程桌面客户端。\n\n功能限制和第三方许可见发行包 README。", "关于 PortHarbor"));
         void Button(string title, Action action) { var item = new ToolStripButton(title) { DisplayStyle = ToolStripItemDisplayStyle.Text, Padding = new Padding(5, 3, 5, 3) }; item.Click += (_, _) => Guard(action); toolbar.Items.Add(item); }
         var split = new SplitContainer { Dock = DockStyle.Fill, FixedPanel = FixedPanel.Panel1, SplitterWidth = 1, BackColor = Color.FromArgb(220, 226, 235), Panel1MinSize = 190 };
         var sidebar = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12), BackColor = tree.BackColor };
@@ -27,7 +27,7 @@ public sealed class MainForm : Form
         var hint = new Label { Dock = DockStyle.Bottom, Height = 48, Text = "双击连接 · 右键管理\nCtrl+N 新建 · Ctrl+W 关闭", ForeColor = Color.SlateGray };
         sidebar.Controls.Add(tree); sidebar.Controls.Add(search); sidebar.Controls.Add(title); sidebar.Controls.Add(hint);
         split.Panel1.Controls.Add(sidebar); split.Panel2.Controls.Add(tabs);
-        var bar = new StatusStrip(); bar.Items.Add(status); bar.Items.Add(new ToolStripStatusLabel("MIT · 0.1.0"));
+        var bar = new StatusStrip(); bar.Items.Add(status); bar.Items.Add(new ToolStripStatusLabel("私有预览版 · 0.1.0"));
         Controls.Add(split); Controls.Add(toolbar); Controls.Add(bar);
         Shown += (_, _) => { split.SplitterDistance = 250; };
         search.TextChanged += (_, _) => RefreshTree();

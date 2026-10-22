@@ -1,6 +1,6 @@
 # PortHarbor
 
-轻量的 Windows 连接工作台，使用 C# / .NET 8 / WinForms 编写，MIT 开源。当前版本为 **0.1.0 预览版**。原生界面和终端，不依赖 Electron、浏览器运行时或内置 Linux 发行版。
+轻量的 Windows 连接工作台，使用 C# / .NET 8 / WinForms 编写。当前版本为 **0.1.0 私有预览版**，尚未选择或发布开源许可证。原生界面和终端，不依赖 Electron、浏览器运行时或内置 Linux 发行版。
 
 本项目独立实现常用的连接管理功能。
 
@@ -108,6 +108,6 @@ dotnet run --project tests/PortHarbor.Checks -c Release -- --integration artifac
 
 测试使用固定的本机专用账号 `easytest` / `easytest-only`，服务仅绑定 `127.0.0.1`，操作限制在指定测试目录。
 
-## 许可
+## 许可证
 
-项目代码使用 MIT 许可证，见 `LICENSE`。依赖及其许可证见 `THIRD-PARTY-NOTICES.md` 与 `licenses/`。项目源码已在 [GitHub](https://github.com/fantuanzzzz/portharbor) 公开发布。
+PortHarbor 自有代码尚未采用开源许可证；获取仓库或预览构建不代表获得复制、修改或再分发项目代码的授权。第三方依赖仍按各自许可证提供，相关许可文本和声明见 `THIRD-PARTY-NOTICES.md` 与 `licenses/`。

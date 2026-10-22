@@ -40,7 +40,7 @@ if ($LASTEXITCODE) { throw 'Portable publish failed' }
 & $Dotnet publish $project -c Release --no-restore -r $rid --self-contained false -o $framework
 if ($LASTEXITCODE) { throw 'Framework-dependent publish failed' }
 
-$docs = @('README.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md') | ForEach-Object { Join-Path $PSScriptRoot $_ }
+$docs = @('README.md', 'THIRD-PARTY-NOTICES.md') | ForEach-Object { Join-Path $PSScriptRoot $_ }
 foreach ($destination in @($portable, $framework)) {
     Copy-Item -LiteralPath $docs -Destination $destination -Force
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'licenses') -Destination $destination -Recurse -Force

@@ -1,6 +1,6 @@
 # Third-party notices
 
-PortHarbor code is licensed under MIT. The following dependencies retain their own copyrights and licenses. License files are included in `licenses/` and must accompany redistribution.
+This file and the `licenses/` directory contain notices for third-party dependencies only. They do not grant a license to PortHarbor's own code. The dependencies retain their own copyrights and licenses; applicable license texts are included in `licenses/` and must accompany redistribution of those dependencies.
 
 | Package | Version | License | Upstream |
 | --- | --- | --- | --- |
