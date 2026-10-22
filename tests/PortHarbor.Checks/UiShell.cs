@@ -1,11 +1,13 @@
 using PortHarbor;
 using System.Text;
 
+namespace PortHarbor.Checks;
+
 internal static class UiShell
 {
     public static void Run(string root,string result)
     {
-        ApplicationConfiguration.Initialize();
+        Program.InitializeUi();
         using var form=new Form { Width=1000,Height=650 };
         var terminal=new TerminalView { Dock=DockStyle.Fill }; form.Controls.Add(terminal);
         var session=new Session { Protocol=Protocol.Shell,Executable="cmd.exe",Arguments="/Q",WorkingDirectory=root };

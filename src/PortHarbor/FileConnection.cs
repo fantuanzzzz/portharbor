@@ -1,92 +1,147 @@
-using FluentFTP;
-using Renci.SshNet;
-
 namespace PortHarbor;
 
-public sealed record RemoteEntry(string Name, string Path, bool Directory, long Size, DateTime Modified);
-public sealed class FileConnection : IDisposable
+/// <summary>Shared transfer policy and diagnostics, independent of vendor protocol clients.</summary>
+public sealed class FileConnection : IFileTransfer
 {
-    readonly Session session; readonly Store store; readonly string password; readonly Func<string, bool> confirm;
-    SftpClient? sftp; FtpClient? ftp; PrivateKeyFile? key;
-    public FileConnection(Session s, Store store, string password, Func<string, bool> confirm) { session = s; this.store = store; this.password = password; this.confirm = confirm; }
+    readonly Protocol protocol;
+    readonly IRemoteFileSystem remote;
+    bool disposed;
+
+    public Guid OperationId { get; } = Guid.NewGuid();
+    public ConnectionState State { get; private set; } = ConnectionState.Created;
+    public event Action<ConnectionDiagnostic>? Diagnostic;
+
+    public FileConnection(Session session, Store store, string password, Func<string, bool> confirm)
+        : this(session.Protocol, RemoteFileSystemFactory.Create(session, store, password, confirm)) { }
+
+    internal FileConnection(Protocol protocol, IRemoteFileSystem remote)
+    {
+        this.protocol = protocol;
+        this.remote = remote;
+    }
+
     public void Connect()
     {
-        if (session.Protocol == Protocol.SFTP)
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (State == ConnectionState.Connected) return;
+        SetState(ConnectionState.Connecting, ConnectionStage.Connecting, ConnectionErrorCode.None, false, "Connecting.");
+        try
         {
-            sftp = new SftpClient(TerminalConnection.SshInfo(session, password, out key));
-            TerminalConnection.HostKey(sftp, session, store, confirm); sftp.OperationTimeout = TimeSpan.FromSeconds(30); sftp.Connect();
+            remote.Connect(stage => SetState(ConnectionState.Connecting, stage, ConnectionErrorCode.None, false, "Connecting."));
+            SetState(ConnectionState.Connected, ConnectionStage.None, ConnectionErrorCode.None, false, "Connected.");
         }
-        else
+        catch (Exception error)
         {
-            ftp = new FtpClient(session.Host, session.Username, password, session.Port);
-            ftp.Config.EncryptionMode = session.UseTls ? FtpEncryptionMode.Explicit : FtpEncryptionMode.None;
-            ftp.Config.DataConnectionType = FtpDataConnectionType.AutoPassive;
-            ftp.Config.ConnectTimeout = 15000; ftp.Config.ReadTimeout = 30000; ftp.Config.DataConnectionReadTimeout = 30000;
-            // Default certificate checks remain enabled. Never accept every certificate.
-            ftp.Connect();
+            var code = DiagnosticClassifier.Classify(error, ConnectionStage.Connecting);
+            SetState(ConnectionState.Failed, ConnectionStage.Connecting, code, DiagnosticClassifier.IsRetryable(code), "File connection failed.");
+            try { remote.Dispose(); }
+            finally { SetState(ConnectionState.Closed, ConnectionStage.Closing, code, false, "Closed."); }
+            throw;
         }
     }
-    public List<RemoteEntry> List(string path) => sftp != null
-        ? sftp.ListDirectory(path).Where(f => f.Name is not ("." or "..")).Select(f => new RemoteEntry(f.Name, f.FullName, f.IsDirectory, f.Length, f.LastWriteTime)).ToList()
-        : ftp!.GetListing(path).Where(f => f.Name is not ("." or "..")).Select(f => new RemoteEntry(f.Name, f.FullName, f.Type == FtpObjectType.Directory, f.Size, f.Modified)).ToList();
-    public bool Exists(string path) => sftp != null ? sftp.Exists(path) : ftp!.FileExists(path) || ftp.DirectoryExists(path);
-    public void Download(string remote, string local, CancellationToken token, Action<long> progress)
-    {
-        using var source = sftp != null ? (Stream)sftp.OpenRead(remote) : ftp!.OpenRead(remote);
-        CopyAtomically(source, local, token, progress);
-    }
+
+    public List<RemoteEntry> List(string path) => Execute(ConnectionStage.Reading, "Listing failed.", () => remote.List(path));
+    public bool Exists(string path) => Execute(ConnectionStage.Reading, "Existence check failed.", () => remote.Exists(path));
+
+    public void Download(string remotePath, string local, CancellationToken token, Action<long> progress)
+        => Execute(ConnectionStage.Reading, "Download failed.", () =>
+        {
+            token.ThrowIfCancellationRequested();
+            using var source = remote.OpenRead(remotePath);
+            CopyAtomically(source, local, token, progress);
+            return true;
+        });
+
     public static void CopyAtomically(Stream source, string destination, CancellationToken token, Action<long> progress)
     {
-        string temp = destination + ".portharbor-" + Guid.NewGuid().ToString("N") + ".part";
+        token.ThrowIfCancellationRequested();
+        string temporaryPath = destination + ".portharbor-" + Guid.NewGuid().ToString("N") + ".part";
         try
         {
-            using (var target = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None)) Copy(source, target, token, progress);
-            token.ThrowIfCancellationRequested(); File.Move(temp, destination, true);
-        }
-        finally { if (File.Exists(temp)) File.Delete(temp); }
-    }
-    public void Upload(string local, string remote, CancellationToken token, Action<long> progress)
-    {
-        // Upload to a distinct temporary name so cancellation never truncates the destination.
-        string temp = remote + ".portharbor-" + Guid.NewGuid().ToString("N") + ".part";
-        try
-        {
-            using (var source = File.OpenRead(local))
-            using (var target = sftp != null ? (Stream)sftp.OpenWrite(temp) : ftp!.OpenWrite(temp)) Copy(source, target, token, progress);
+            using (var target = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                Copy(source, target, token, progress);
             token.ThrowIfCancellationRequested();
-            if (sftp != null)
-            {
-                // POSIX atomic replacement is extension-dependent; do not delete an existing file first.
-                if (sftp.Exists(remote))
-                {
-                    try { sftp.RenameFile(temp, remote, true); }
-                    catch (NotSupportedException)
-                    {
-                        // Servers without POSIX rename: retain the old file until replacement succeeds.
-                        string backup = remote + ".portharbor-" + Guid.NewGuid().ToString("N") + ".bak";
-                        sftp.RenameFile(remote, backup);
-                        try { sftp.RenameFile(temp, remote); }
-                        catch { if (!sftp.Exists(remote)) sftp.RenameFile(backup, remote); throw; }
-                        try { sftp.DeleteFile(backup); } catch { /* preserve backup if server cleanup fails */ }
-                    }
-                }
-                else sftp.RenameFile(temp, remote);
-            }
-            else if (!ftp!.MoveFile(temp, remote, FtpRemoteExists.Overwrite)) throw new IOException("远程重命名失败。");
+            File.Move(temporaryPath, destination, true);
         }
-        finally
-        {
-            try { if (sftp != null && sftp.Exists(temp)) sftp.DeleteFile(temp); else if (ftp != null && ftp.FileExists(temp)) ftp.DeleteFile(temp); } catch { /* disconnected; remote .part can be removed on reconnect */ }
-        }
+        finally { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); }
     }
+
+    public void Upload(string local, string remotePath, CancellationToken token, Action<long> progress)
+        => Execute(ConnectionStage.Writing, "Upload failed.", () =>
+        {
+            token.ThrowIfCancellationRequested();
+            string temporaryPath = remotePath + ".portharbor-" + Guid.NewGuid().ToString("N") + ".part";
+            try
+            {
+                using (var source = File.OpenRead(local))
+                using (var target = remote.OpenWrite(temporaryPath))
+                    Copy(source, target, token, progress);
+                token.ThrowIfCancellationRequested();
+                remote.CommitUpload(temporaryPath, remotePath);
+            }
+            finally
+            {
+                // Cleanup is best effort; preserve the original transfer error if disconnected.
+                try { if (remote.Exists(temporaryPath)) remote.DeleteFile(temporaryPath); } catch { }
+            }
+            return true;
+        });
+
     static void Copy(Stream source, Stream destination, CancellationToken token, Action<long> progress)
     {
-        var buffer = new byte[65536]; long done = 0;
-        while (true) { token.ThrowIfCancellationRequested(); int n = source.Read(buffer); if (n == 0) break; destination.Write(buffer, 0, n); done += n; progress(done); }
+        var buffer = new byte[65536];
+        long done = 0;
+        while (true)
+        {
+            token.ThrowIfCancellationRequested();
+            int count = source.Read(buffer);
+            if (count == 0) break;
+            destination.Write(buffer, 0, count);
+            done += count;
+            progress(done);
+        }
         destination.Flush();
     }
-    public void Mkdir(string path) { if (sftp != null) sftp.CreateDirectory(path); else ftp!.CreateDirectory(path); }
-    public void Rename(string source, string dest) { if (Exists(dest)) throw new IOException("目标名称已经存在。"); if (sftp != null) sftp.RenameFile(source, dest); else ftp!.Rename(source, dest); }
-    public void Delete(RemoteEntry f) { if (sftp != null) { if (f.Directory) sftp.DeleteDirectory(f.Path); else sftp.DeleteFile(f.Path); } else { if (f.Directory) { if (ftp!.GetListing(f.Path).Any()) throw new IOException("仅允许删除空目录。"); ftp.DeleteDirectory(f.Path); } else ftp!.DeleteFile(f.Path); } }
-    public void Dispose() { sftp?.Dispose(); ftp?.Dispose(); key?.Dispose(); }
+
+    public void Mkdir(string path) => Execute(ConnectionStage.Writing, "Create directory failed.", () => { remote.Mkdir(path); return true; });
+
+    public void Rename(string source, string dest) => Execute(ConnectionStage.Writing, "Rename failed.", () =>
+    {
+        if (remote.Exists(dest)) throw new IOException("目标名称已经存在。");
+        remote.Rename(source, dest);
+        return true;
+    });
+
+    public void Delete(RemoteEntry entry) => Execute(ConnectionStage.Writing, "Delete failed.", () => { remote.Delete(entry); return true; });
+
+    public void Dispose()
+    {
+        if (disposed) return;
+        disposed = true;
+        SetState(ConnectionState.Closing, ConnectionStage.Closing, ConnectionErrorCode.None, false, "Closing.");
+        try { remote.Dispose(); }
+        finally { SetState(ConnectionState.Closed, ConnectionStage.Closing, ConnectionErrorCode.None, false, "Closed."); }
+    }
+
+    T Execute<T>(ConnectionStage stage, string message, Func<T> action)
+    {
+        try
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            if (State != ConnectionState.Connected) throw new InvalidOperationException("文件连接尚未建立。");
+            return action();
+        }
+        catch (Exception error)
+        {
+            var code = DiagnosticClassifier.Classify(error, stage);
+            Diagnostic?.Invoke(new ConnectionDiagnostic(OperationId, protocol, State, stage, code, DiagnosticClassifier.IsRetryable(code), message));
+            throw;
+        }
+    }
+
+    void SetState(ConnectionState state, ConnectionStage stage, ConnectionErrorCode code, bool retryable, string message)
+    {
+        State = state;
+        Diagnostic?.Invoke(new ConnectionDiagnostic(OperationId, protocol, state, stage, code, retryable, message));
+    }
 }

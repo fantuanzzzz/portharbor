@@ -10,7 +10,7 @@
     <Version>0.1.0</Version>
     <AssemblyName>PortHarbor</AssemblyName>
     <Product>PortHarbor</Product>
-    <Description>Lightweight open-source Windows connection manager</Description>
+    <Description>Lightweight Windows connection manager preview</Description>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
   <ItemGroup>

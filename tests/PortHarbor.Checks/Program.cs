@@ -3,7 +3,9 @@ using System.Net.Sockets;
 using System.Text;
 using PortHarbor;
 
-internal static class Program
+namespace PortHarbor.Checks;
+
+internal static partial class Program
 {
     static int passed;
     static readonly List<string> results = [];
@@ -12,29 +14,67 @@ internal static class Program
     static async Task<int> Main(string[] args)
     {
         string root = Path.Combine(Path.GetTempPath(), "PortHarbor-check-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
+        string? failure = null;
         try
         {
             if (args.Length > 0 && args[0] == "--ui") { Ui(root, args[1]); return 0; }
             if (args.Length > 0 && args[0] == "--ui-shell") { UiShell.Run(root, args[1]); return 0; }
-            Storage(root); Terminal(); Telnet(); await TelnetRoundTrip(root); if (!args.Contains("--skip-shell")) await Shell(root); Transfer(root); await Lifecycle(root);
-            if (args.Length >= 2 && args[0] == "--integration") { Integration(root, args[1]); await SshRoundTrip(root,args[1]); }
+            string? configPath = Option(args, "--integration");
+            if (args.Contains("--unit"))
+            {
+                Storage(root); Terminal(); Telnet(); Transfer(root); FileDiagnostics(root); FileTransferContract(root);
+            }
+            else if (args.Contains("--windows"))
+            {
+                await Shell(root); await Lifecycle(root);
+            }
+            else if (configPath != null)
+            {
+                await TelnetRoundTrip(root); Integration(root, configPath); await SshRoundTrip(root, configPath);
+            }
+            else
+            {
+                Storage(root); Terminal(); Telnet(); await TelnetRoundTrip(root);
+                if (!args.Contains("--skip-shell")) await Shell(root);
+                Transfer(root); await Lifecycle(root);
+            }
             Console.WriteLine($"{passed} checks passed");
-            int resultIndex = Array.IndexOf(args, "--results");
-            string? resultPath = resultIndex >= 0 && resultIndex + 1 < args.Length ? args[resultIndex + 1] : args.Length == 1 && args[0].EndsWith(".json") ? args[0] : null;
-            if (resultPath != null) File.WriteAllText(resultPath, System.Text.Json.JsonSerializer.Serialize(new { passed, results, date = DateTimeOffset.Now }, Store.Json));
             return 0;
         }
-        catch (Exception e) { Console.Error.WriteLine(e); return 1; }
+        catch (Exception e) { failure = e.ToString(); Console.Error.WriteLine(e); return 1; }
+        finally
+        {
+            string? resultPath = Option(args, "--results") ?? (args.Length == 1 && args[0].EndsWith(".json") ? args[0] : null);
+            if (resultPath != null)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(resultPath))!);
+                File.WriteAllText(resultPath, System.Text.Json.JsonSerializer.Serialize(new { passed, results, failure, date = DateTimeOffset.Now }, Store.Json));
+            }
+        }
     }
+    static string? Option(string[] args, string name)
+    {
+        int index = Array.IndexOf(args, name);
+        return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+    }
+    // Configure check windows directly: both friend assemblies generate a global ApplicationConfiguration type.
+    internal static void InitializeUi()
+    {
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
+        Application.SetHighDpiMode(HighDpiMode.SystemAware);
+    }
+
     static void Ui(string root, string output)
     {
-        ApplicationConfiguration.Initialize();
+        InitializeUi();
         using var form = new MainForm(new Store(Path.Combine(root,"ui")));
         form.Show(); Application.DoEvents();
         using var bitmap = new System.Drawing.Bitmap(form.Width,form.Height); form.DrawToBitmap(bitmap,form.ClientRectangle); bitmap.Save(output);
         Check(form.Visible && form.Controls.Count>0,"main window renders without error");
         foreach(var p in Enum.GetValues<Protocol>()) { using var editor = new SessionEditor(new Session { Protocol=p,Port=Session.DefaultPort(p) }); editor.Show(); Application.DoEvents(); editor.Close(); }
         Check(true,"all seven protocol editors open without error"); form.Close();
+        FileTransferUi();
     }
     static async Task SshRoundTrip(string root,string configPath)
     {
@@ -127,6 +167,18 @@ internal static class Program
         connection.Send(Encoding.UTF8.GetBytes("exit\r")); await run.WaitAsync(TimeSpan.FromSeconds(12));
         Check(text.ToString().Contains("CONPTY_OK"), "real interactive ConPTY shell input/output/resize/exit");
     }
+    static void FileDiagnostics(string root)
+    {
+        var backend = new MemoryRemoteFileSystem { ConnectError = new SocketException((int)SocketError.NetworkUnreachable) };
+        using IFileTransfer connection = new FileConnection(Protocol.FTP, backend);
+        var diagnostics = new List<ConnectionDiagnostic>(); connection.Diagnostic += diagnostics.Add;
+        try { connection.Connect(); } catch (SocketException) { }
+        Check(connection.OperationId != Guid.Empty && diagnostics.Any(d => d.State == ConnectionState.Failed) && diagnostics.Any(d => d.State == ConnectionState.Closed), "file connection diagnostics report failed and closed lifecycle");
+        var failure = diagnostics.First(d => d.State == ConnectionState.Failed);
+        var rendered = DiagnosticPresenter.Error(failure with { Message = "endpoint.invalid/private/password" });
+        Check(!rendered.Contains("endpoint.invalid") && !rendered.Contains("password") && rendered.Contains("操作编号"), "diagnostic presenter hides endpoint details");
+    }
+
     static void Transfer(string root)
     {
         string dest = Path.Combine(root,"download.bin"); File.WriteAllText(dest,"original");
@@ -138,8 +190,10 @@ internal static class Program
     static async Task Lifecycle(string root)
     {
         using var connection = new TerminalConnection(new Session { Protocol = Protocol.Shell, Executable="no-such-portharbor-program.exe" },new Store(Path.Combine(root,"invalid-shell")),"",_=>false);
+        var diagnostics = new List<ConnectionDiagnostic>(); connection.Diagnostic += diagnostics.Add;
         bool failed=false; try { await connection.Run(80,24).WaitAsync(TimeSpan.FromSeconds(8)); } catch(System.ComponentModel.Win32Exception) { failed=true; }
         Check(failed,"invalid executable fails cleanly without leaked startup state");
+        Check(connection.OperationId != Guid.Empty && diagnostics.Any(d => d.State == ConnectionState.Failed && d.ErrorCode == ConnectionErrorCode.PlatformUnavailable) && connection.State == ConnectionState.Closed, "connection diagnostics report operation, stable error and closed state");
     }
     static void Integration(string root, string configPath)
     {
@@ -148,13 +202,31 @@ internal static class Program
         {
             var s=new Session { Protocol=protocol, Host="127.0.0.1", Port=c.GetProperty(protocol.ToString().ToLowerInvariant()+"Port").GetInt32(), Username="easytest" };
             var store=new Store(Path.Combine(root,protocol.ToString()));
-            using var files=new FileConnection(s,store,"easytest-only",_=>true); files.Connect();
+            using IFileTransfer files=FileTransferFactory.Create(s,store,"easytest-only",_=>true); files.Connect();
             string local=Path.Combine(root,"upload-"+protocol+".txt"),download=local+".download"; File.WriteAllText(local,"文件传输 test \0\n"+new string('x',200000));
             if (files.Exists("/test-dir")) { foreach(var old in files.List("/test-dir")) files.Delete(old); files.Delete(new("test-dir","/test-dir",true,0,DateTime.Now)); }
             files.Mkdir("/test-dir"); files.Upload(local,"/test-dir/中文.txt",CancellationToken.None,_=>{});
             Check(files.List("/test-dir").Any(f=>f.Name=="中文.txt"),protocol+" lists uploaded Unicode filename");
+            Check(Throws<IOException>(() => files.Delete(new("test-dir","/test-dir",true,0,DateTime.Now))) && files.Exists("/test-dir/中文.txt"), protocol+" refuses nonempty directory deletion");
+            files.Upload(local,"/test-dir/existing.txt",CancellationToken.None,_=>{});
+            Check(Throws<IOException>(() => files.Rename("/test-dir/中文.txt","/test-dir/existing.txt")) && files.Exists("/test-dir/中文.txt"), protocol+" refuses rename over existing target");
+            files.Delete(new("existing.txt","/test-dir/existing.txt",false,0,DateTime.Now));
             files.Download("/test-dir/中文.txt",download,CancellationToken.None,_=>{});
             Check(File.ReadAllBytes(local).SequenceEqual(File.ReadAllBytes(download)),protocol+" upload/download bytes round trip");
+            using (var stop = new CancellationTokenSource())
+            {
+                Check(Throws<OperationCanceledException>(() => files.Upload(local,"/test-dir/中文.txt",stop.Token,_=>stop.Cancel()))
+                    && files.List("/test-dir").Count==1, protocol+" cancelled upload removes remote temporary file");
+                files.Download("/test-dir/中文.txt",download,CancellationToken.None,_=>{});
+                Check(File.ReadAllBytes(local).SequenceEqual(File.ReadAllBytes(download)), protocol+" cancelled upload retains previous remote content");
+            }
+            using (var stop = new CancellationTokenSource())
+            {
+                File.WriteAllText(download,"preserved local target");
+                Check(Throws<OperationCanceledException>(() => files.Download("/test-dir/中文.txt",download,stop.Token,_=>stop.Cancel()))
+                    && File.ReadAllText(download)=="preserved local target" && !Directory.EnumerateFiles(root,"*.part").Any(),
+                    protocol+" cancelled download preserves local target and removes temporary file");
+            }
             File.WriteAllText(local,"replacement"); files.Upload(local,"/test-dir/中文.txt",CancellationToken.None,_=>{});
             files.Download("/test-dir/中文.txt",download,CancellationToken.None,_=>{}); Check(File.ReadAllText(download)=="replacement",protocol+" overwrite path");
             files.Rename("/test-dir/中文.txt","/test-dir/renamed.txt"); var file=files.List("/test-dir").Single(); files.Delete(file); files.Delete(new("test-dir","/test-dir",true,0,DateTime.Now));

@@ -1,0 +1,71 @@
+name: Windows CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+      - name: Install loopback fixture dependencies
+        run: python -m pip install -r tests/requirements.txt
+      - name: Restore locked dependencies
+        run: dotnet restore tests/PortHarbor.Checks/PortHarbor.Checks.csproj --runtime win-x64 --configfile NuGet.Config
+      - name: Build Release
+        run: dotnet build tests/PortHarbor.Checks/PortHarbor.Checks.csproj -c Release --no-restore
+      - name: Fast core checks
+        run: dotnet run --project tests/PortHarbor.Checks -c Release --no-build -- --unit --results artifacts/unit-results.json
+      - name: Windows shell and lifecycle checks
+        run: dotnet run --project tests/PortHarbor.Checks -c Release --no-build -- --windows --results artifacts/windows-results.json
+      - name: Protocol loopback checks
+        shell: pwsh
+        run: |
+          $fixtureRoot = Join-Path $env:RUNNER_TEMP 'portharbor-protocol-fixture'
+          $serversPath = Join-Path $fixtureRoot 'servers.json'
+          $stdout = Join-Path $env:RUNNER_TEMP 'portharbor-fixture-out.log'
+          $stderr = Join-Path $env:RUNNER_TEMP 'portharbor-fixture-error.log'
+          $fixture = Start-Process -FilePath python -ArgumentList @('tests/protocol_servers.py', '--root', $fixtureRoot) -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          try {
+            for ($i = 0; $i -lt 60 -and -not (Test-Path $serversPath); $i++) {
+              if ($fixture.HasExited) { throw "Protocol fixture exited early: $(Get-Content $stderr -Raw)" }
+              Start-Sleep -Seconds 1
+            }
+            if (-not (Test-Path $serversPath)) { throw "Protocol fixture did not become ready: $(Get-Content $stderr -Raw)" }
+            dotnet run --project tests/PortHarbor.Checks -c Release --no-build -- --integration $serversPath --results artifacts/integration-results.json
+            if ($LASTEXITCODE -ne 0) { throw 'Protocol integration checks failed' }
+          }
+          finally {
+            if (-not $fixture.HasExited) { Stop-Process -Id $fixture.Id -Force }
+          }
+      - name: UI and terminal rendering smoke
+        shell: pwsh
+        run: |
+          $screenshot = Join-Path $env:RUNNER_TEMP 'portharbor-ui.png'
+          $terminalOutput = Join-Path $env:RUNNER_TEMP 'portharbor-ui-terminal.txt'
+          dotnet run --project tests/PortHarbor.Checks -c Release --no-build -- --ui $screenshot
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $screenshot)) { throw 'UI rendering smoke failed' }
+          dotnet run --project tests/PortHarbor.Checks -c Release --no-build -- --ui-shell $terminalOutput
+          if ($LASTEXITCODE -ne 0 -or -not (Select-String -Path $terminalOutput -Pattern 'CONPTY_OK' -Quiet)) { throw 'UI terminal smoke failed' }
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-ci-reports
+          path: |
+            artifacts/*-results.json
+            ${{ runner.temp }}/portharbor-ui.png
+            ${{ runner.temp }}/portharbor-ui-terminal.txt
+          if-no-files-found: ignore

@@ -2,7 +2,7 @@ namespace PortHarbor;
 
 public sealed class FileView : UserControl
 {
-    readonly FileConnection connection;
+    readonly IFileTransfer connection;
     readonly TextBox path = new() { Width = 340 };
     readonly ListView list = new() { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, MultiSelect = false, HideSelection = false };
     readonly Label status = new() { Dock = DockStyle.Bottom, Height = 28, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(8, 0, 0, 0) };
@@ -11,8 +11,12 @@ public sealed class FileView : UserControl
     CancellationTokenSource? taskStop;
     bool busy, connected, closing;
     public FileView(Session s, Store store, string password, Func<string, bool> confirm)
+        : this(FileTransferFactory.Create(s, store, password, confirm), s.RemotePath) { }
+
+    // The view owns and disposes the supplied transfer instance.
+    public FileView(IFileTransfer connection, string initialPath)
     {
-        connection = new(s, store, password, confirm); path.Text = s.RemotePath;
+        this.connection = connection; connection.Diagnostic += OnDiagnostic; path.Text = initialPath;
         list.Columns.Add("名称", 300); list.Columns.Add("类型", 80); list.Columns.Add("字节", 110); list.Columns.Add("修改时间", 170);
         toolbar.Controls.Add(path);
         Add("前往", async () => await LoadPath());
@@ -31,6 +35,7 @@ public sealed class FileView : UserControl
     static string ParentPath(string value) { var p = value.TrimEnd('/'); int at = p.LastIndexOf('/'); return at <= 0 ? "/" : p[..at]; }
     static bool ValidName(string name) => name.Length > 0 && name is not ("." or "..") && !name.Any(c => c is '/' or '\\' || char.IsControl(c));
     void SetStatus(string text) { if (!IsDisposed && IsHandleCreated && !closing) BeginInvoke(() => status.Text = text); }
+    void OnDiagnostic(ConnectionDiagnostic diagnostic) { SetStatus(DiagnosticPresenter.Status(diagnostic)); }
     async Task Work(Func<CancellationToken, Task> operation)
     {
         if (busy || closing) return;
@@ -40,7 +45,7 @@ public sealed class FileView : UserControl
         status.Text = "处理中…";
         try { await operation(taskStop.Token); if (!closing) status.Text = taskStop.IsCancellationRequested ? "任务已取消" : "就绪"; }
         catch (OperationCanceledException) { if (!closing) status.Text = "任务已取消；原目标文件已保留。"; }
-        catch (Exception e) { if (!closing) { status.Text = "操作失败"; MessageBox.Show(this, e.Message, "文件传输", MessageBoxButtons.OK, MessageBoxIcon.Error); } }
+        catch (Exception) { if (!closing) { status.Text = "操作失败"; MessageBox.Show(this, connection.State == ConnectionState.Failed ? "文件操作失败，请根据状态栏中的错误码排查。" : "文件操作未完成。", "PortHarbor", MessageBoxButtons.OK, MessageBoxIcon.Error); } }
         finally
         {
             taskStop.Dispose(); taskStop = null; busy = false;
@@ -96,5 +101,5 @@ public sealed class FileView : UserControl
         if (busy || Selected is not { } f || MessageBox.Show(this, "永久删除此项目？（目录必须为空）\n" + f.Path, "删除", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
         await Work(async token => { await Task.Run(() => connection.Delete(f), token); await RefreshListing(); });
     }
-    protected override void Dispose(bool disposing) { if (disposing) { closing = true; taskStop?.Cancel(); if (!busy) connection.Dispose(); } base.Dispose(disposing); }
+    protected override void Dispose(bool disposing) { if (disposing) { closing = true; taskStop?.Cancel(); connection.Diagnostic -= OnDiagnostic; if (!busy) connection.Dispose(); } base.Dispose(disposing); }
 }

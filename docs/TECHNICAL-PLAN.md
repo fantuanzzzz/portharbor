@@ -23,7 +23,7 @@ PortHarbor 当前是 Windows 桌面连接工作台，提供 SSH、Telnet、RDP�
 | 桌面 UI | 单个 `net8.0-windows` WinForms 项目；`MainForm` 创建连接视图、连接对象并负责导航 | 保留 WinForms 作为当前壳；将连接生命周期和用例编排移出窗体 |
 | 会话与存储 | `Session`、`AppData`、JSON 序列化、校验、备份、导入导出都在 `Models.cs`；配置 schema 版本为 1 | 先稳定版本化的数据契约，再调整存储实现 |
 | 终端会话 | `TerminalConnection` 同时处理 SSH、Telnet、串口、Shell、I/O 队列、取消和资源释放 | 按协议拆成连接适配器，统一终端会话接口和错误模型 |
-| 文件传输 | `FileConnection` 同时包装 FTP/SFTP，并提供复制、覆盖、临时文件等策略；`FileView` 管理 UI 任务 | 把协议适配、传输用例、UI 进度/取消分开 |
+| 文件传输 | `FileView` 依赖 `IFileTransfer`；`FileConnection` 管理共享传输策略，FTP/SFTP 经 `IRemoteFileSystem` 独立适配 | 已完成同步边界拆分；下一步加入原生异步、超时与取消，详见 [文件传输约定](FILE-TRANSFER.md) |
 | 终端显示 | `TerminalScreen` 解析终端状态，`TerminalView` 绘制 WinForms 控件 | 把解析器保持为可独立测试的组件；渲染层通过屏幕状态/事件消费它 |
 | Windows 边界 | `SecretProtection` 调用 DPAPI；`ConPty` 调用 Win32；RDP 通过 `mstsc.exe` 启动 | 明确 `ISecretProtector`、`ILocalShell`、`IRemoteDesktopLauncher` 平台服务 |
 | 依赖与构建 | SSH.NET、FluentFTP、System.IO.Ports；锁定 NuGet 依赖；`build.ps1` 恢复、构建、运行检查并生成两种 x64 ZIP | 保留锁文件；CI 与本地脚本调用同一组可复现命令；发布目录使用暂存后提交 |

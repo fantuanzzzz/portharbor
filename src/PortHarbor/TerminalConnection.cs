@@ -21,6 +21,10 @@ public sealed class TerminalConnection : IDisposable
     SerialPort? serial; TcpClient? tcp; ConPty? pty; PrivateKeyFile? key;
     TelnetCodec? telnet;
     int disposed;
+    ConnectionStage stage;
+    public Guid OperationId { get; } = Guid.NewGuid();
+    public ConnectionState State { get; private set; } = ConnectionState.Created;
+    public event Action<ConnectionDiagnostic>? Diagnostic;
     public event Action<string>? Output;
     public TerminalConnection(Session session, Store store, string password, Func<string, bool> confirm) { this.session = session; this.store = store; this.password = password; this.confirm = confirm; }
     public static ConnectionInfo SshInfo(Session s, string password, out PrivateKeyFile? key)
@@ -38,6 +42,7 @@ public sealed class TerminalConnection : IDisposable
     }
     public async Task Run(int columns, int rows)
     {
+        SetState(ConnectionState.Connecting, ConnectionStage.Connecting);
         try
         {
             await Task.Run(() =>
@@ -45,23 +50,29 @@ public sealed class TerminalConnection : IDisposable
                 stop.Token.ThrowIfCancellationRequested();
                 switch (session.Protocol)
                 {
-                    case Protocol.Shell: pty = new ConPty(session, columns, rows); input = pty.Input; output = pty.Output; break;
+                    case Protocol.Shell: stage = ConnectionStage.OpeningChannel; pty = new ConPty(session, columns, rows); input = pty.Input; output = pty.Output; break;
                     case Protocol.SSH:
+                        stage = ConnectionStage.Authenticating;
                         ssh = new SshClient(SshInfo(session, password, out key));
-                        HostKey(ssh, session, store, confirm); ssh.Connect();
+                        HostKey(ssh, session, store, confirm); stage = ConnectionStage.HostKeyVerification; ssh.Connect();
                         stop.Token.ThrowIfCancellationRequested();
+                        stage = ConnectionStage.OpeningChannel;
                         shell = ssh.CreateShellStream("vt100", (uint)columns, (uint)rows, 0, 0, 32768); input = output = shell; break;
                     case Protocol.Serial:
+                        stage = ConnectionStage.OpeningChannel;
                         serial = new SerialPort(session.SerialPort, session.BaudRate, Enum.Parse<Parity>(session.Parity), session.DataBits, Enum.Parse<StopBits>(session.StopBits)) { Handshake = Enum.Parse<Handshake>(session.Handshake), WriteTimeout = 5000 };
                         serial.Open(); input = output = serial.BaseStream; break;
                     case Protocol.Telnet:
+                        stage = ConnectionStage.Connecting;
                         tcp = new TcpClient();
                         tcp.ConnectAsync(session.Host, session.Port, stop.Token).AsTask().GetAwaiter().GetResult();
+                        stage = ConnectionStage.OpeningChannel;
                         input = output = tcp.GetStream(); telnet = new TelnetCodec(WriteRaw); break;
                     default: throw new NotSupportedException();
                 }
             }, stop.Token);
             stop.Token.ThrowIfCancellationRequested();
+            SetState(ConnectionState.Connected, stage);
             _ = Task.Run(async () =>
             {
                 try { await foreach (var bytes in writes.Reader.ReadAllAsync(stop.Token)) WriteRaw(bytes); }
@@ -73,6 +84,7 @@ public sealed class TerminalConnection : IDisposable
             while (true)
             {
                 var currentOutput = output!;
+                stage = ConnectionStage.Reading;
                 int n = await Task.Run(() => currentOutput.Read(buffer, 0, buffer.Length));
                 if (n == 0) break;
                 byte[] bytes = telnet?.Decode(buffer.AsSpan(0, n)) ?? buffer[..n];
@@ -80,10 +92,18 @@ public sealed class TerminalConnection : IDisposable
                 Output?.Invoke(new string(chars, 0, count));
             }
         }
-        catch (Exception e) when (stop.IsCancellationRequested) { System.Diagnostics.Debug.WriteLine(e.GetType().Name); }
-        finally { writes.Writer.TryComplete(); stop.Cancel(); await Task.Run(CloseResources); Output?.Invoke("\r\n\x1b[90m[连接已关闭]\x1b[0m\r\n"); }
+        catch (Exception) when (stop.IsCancellationRequested) { Publish(ConnectionState.Closed, ConnectionStage.Closing, ConnectionErrorCode.Cancelled, false, "Connection cancelled."); }
+        catch (Exception e)
+        {
+            var code = DiagnosticClassifier.Classify(e, stage);
+            Publish(ConnectionState.Failed, stage, code, DiagnosticClassifier.IsRetryable(code), "Connection failed.");
+            throw;
+        }
+        finally { SetState(ConnectionState.Closing, ConnectionStage.Closing); writes.Writer.TryComplete(); stop.Cancel(); await Task.Run(CloseResources); SetState(ConnectionState.Closed, ConnectionStage.Closing); Output?.Invoke("\r\n\x1b[90m[连接已关闭]\x1b[0m\r\n"); }
     }
-    void WriteRaw(byte[] bytes) { lock (writeGate) { input?.Write(bytes); input?.Flush(); } }
+    void WriteRaw(byte[] bytes) { lock (writeGate) { stage = ConnectionStage.Writing; input?.Write(bytes); input?.Flush(); } }
+    void SetState(ConnectionState state, ConnectionStage currentStage) { State = state; stage = currentStage; Publish(state, currentStage, ConnectionErrorCode.None, false, string.Empty); }
+    void Publish(ConnectionState state, ConnectionStage currentStage, ConnectionErrorCode code, bool retryable, string message) => Diagnostic?.Invoke(new ConnectionDiagnostic(OperationId, session.Protocol, state, currentStage, code, retryable, message));
     public void Send(byte[] bytes)
     {
         if (disposed != 0) return;

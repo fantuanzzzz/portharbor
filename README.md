@@ -77,11 +77,12 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 脚本在项目内缓存构建数据，恢复依赖、编译并执行检查，然后生成自包含和框架依赖两个 x64 发行 ZIP，放在 `artifacts`。自包含包把 .NET 运行环境打入单文件；框架依赖包附带 `Start-PortHarbor.cmd` 启动检测。运行时依赖版本与哈希记录在 `src\PortHarbor\packages.lock.json`。项目结构：
 
 ```text
-src/PortHarbor/                界面、连接、终端及数据存储
-tests/PortHarbor.Checks/        无测试框架依赖的检查程序
-tests/protocol_servers.py     仅监听本机的 FTP / SSH / SFTP 测试服务
-licenses/                     随包分发的第三方许可文本
-build.ps1                     构建和发布
+src/PortHarbor/                 界面、连接、终端及数据存储
+tests/PortHarbor.Checks/        分层检查入口和 Windows UI 检查
+tests/protocol_servers.py       仅监听本机的 FTP / SSH / SFTP 测试服务
+.github/workflows/              Windows CI 工作流
+licenses/                       随包分发的第三方许可文本
+build.ps1                       构建和发布
 ```
 
 ## 验证
@@ -90,24 +91,34 @@ build.ps1                     构建和发布
 
 RDP 验证覆盖配置生成，不含真实远程桌面登录；串口尚无实体设备测试。FTPS、私钥登录和其他服务器实现也尚未完成实机互通测试。
 
-基本检查可单独运行：
+快速核心检查、Windows 专属检查和 UI 冒烟可以分别运行：
 
 ```powershell
-dotnet run --project tests/PortHarbor.Checks -c Release -- --results artifacts/check-results.json
+dotnet run --project tests/PortHarbor.Checks -c Release -- --unit --results artifacts/unit-results.json
+dotnet run --project tests/PortHarbor.Checks -c Release -- --windows --results artifacts/windows-results.json
+dotnet run --project tests/PortHarbor.Checks -c Release -- --ui "$env:TEMP\portharbor-ui.png"
+dotnet run --project tests/PortHarbor.Checks -c Release -- --ui-shell "$env:TEMP\portharbor-terminal.txt"
 ```
 
-完整回环测试需要 Python 及测试专用依赖，应用本身不需要 Python：
+完整协议回环测试需要 Python 及测试专用依赖，应用本身不需要 Python。先启动本地 fixture，再运行协议集成入口：
 
 ```powershell
 python -m pip install -r tests/requirements.txt
 # 在第一个终端运行，结束后按 Ctrl+C
 python tests/protocol_servers.py --root artifacts/protocol-fixture
-# 在第二个终端运行
+# 在第二个终端运行；包括 Telnet、FTP、SFTP 和 SSH 回环检查
 dotnet run --project tests/PortHarbor.Checks -c Release -- --integration artifacts/protocol-fixture/servers.json --results artifacts/integration-results.json
 ```
+
+GitHub Actions 在 Windows Runner 上分别执行核心、Windows、协议和 UI 检查，并上传 JSON 结果报告。`build.ps1` 执行核心与 Windows 检查；发布文件先写入 `artifacts` 下的暂存目录，全部成功后再替换现有 ZIP 和发布目录。
 
 测试使用固定的本机专用账号 `easytest` / `easytest-only`，服务仅绑定 `127.0.0.1`，操作限制在指定测试目录。
 
 ## 许可证
 
 PortHarbor 自有代码尚未采用开源许可证；获取仓库或预览构建不代表获得复制、修改或再分发项目代码的授权。第三方依赖仍按各自许可证提供，相关许可文本和声明见 `THIRD-PARTY-NOTICES.md` 与 `licenses/`。
+## Development Workbook
+
+Every development session is recorded in [`docs/DEVELOPMENT-LOG.md`](docs/DEVELOPMENT-LOG.md). Each entry includes the development scope, changed files, verification results, known problems, and the next step. Failed checks and environment limitations are recorded as well.
+
+文件传输接口、协议适配器、扩展方式及当前取消语义见 [文件传输接口与扩展约定](docs/FILE-TRANSFER.md)。
