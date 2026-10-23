@@ -1,4 +1,4 @@
-# PortHarbor
+﻿# PortHarbor
 
 轻量的 Windows 连接工作台，使用 C# / .NET 8 / WinForms 编写。当前版本为 **0.1.0 私有预览版**，尚未选择或发布开源许可证。原生界面和终端，不依赖 Electron、浏览器运行时或内置 Linux 发行版。
 
@@ -15,31 +15,51 @@
 | SFTP | SSH 密码或私钥登录、主机密钥校验，与 FTP 相同的基础文件管理 |
 | Serial | COM 口、波特率、数据位、校验、停止位和流控设置 |
 | Shell | Windows ConPTY 内嵌交互命令行，可配置程序、参数和工作目录 |
-| 会话 | 保存、分组、搜索、复制、编辑、删除、JSON 导入和导出、多标签连接 |
-| 密码 | 可选保存，使用 Windows 用户级 DPAPI 加密；导出会话不含密码 |
+| 会话 | 保存、分类文件夹（图标、嵌套和空分类）、搜索、复制、编辑、删除、JSON 导入和导出、多标签连接 |
+| 密码 | 可选保存，主密码加密；安装版叠加 Windows 用户级 DPAPI；导出会话不含密码 |
 
 ## 运行
 
 需要 Windows 10 1809 或更新版本 / Windows 11，x64。
 
-发行包提供两种选择：
+预览阶段提供两个 x64 目录包，默认都需要 .NET 8 Desktop Runtime x64：
 
-- `PortHarbor-0.1.0-portable-win-x64.zip`：自包含单文件包，包含 .NET 运行环境，解压后双击 `PortHarbor.exe` 即可运行，不需要另外安装 .NET Desktop Runtime。
-- `PortHarbor-0.1.0-framework-win-x64.zip`：体积较小，需要 .NET 8 Desktop Runtime x64。双击 `Start-PortHarbor.cmd` 会先检测运行环境；缺少时提示并打开微软下载页。该版本的 `PortHarbor.exe` 也可在已安装运行环境的机器上直接启动。
+- `PortHarbor-0.1.0-installed-win-x64.zip`：安装版目录布局，配置放在用户目录。目前是 ZIP 预览包，尚未提供安装向导。
+- `PortHarbor-0.1.0-portable-win-x64.zip`：便携版，解压到可写目录，直接运行 `PortHarbor.exe`；首次启动在程序旁创建 `PortHarbor.ini`。整个目录可一起移动。
 
-两个版本都需要 Windows 系统组件支持 RDP、ConPTY 和 DPAPI；RDP 使用 Windows 自带的远程桌面客户端。
+安装版目录中的 `Start-PortHarbor.cmd` 会检测运行环境。`-IncludeRuntime` 仅控制两种包是否包含 .NET 环境，与安装/便携数据模式独立。
+
+应用需要 Windows 系统组件支持 RDP、ConPTY 和 DPAPI；RDP 使用 Windows 自带的远程桌面客户端。
+
+菜单分为「文件 / 会话 / 窗口 / 设置 / 帮助」，各项操作在下拉菜单中。
+
+「会话 → 新建根分类」创建顶层文件夹；选中文件夹后用「新建子分类」或右键同名操作创建下一级，可继续嵌套。空分类也会保存。文件夹、终端、远程桌面和文件传输有不同图标。新建会话默认使用当前分类，编辑器支持输入 `工作/交换机/核心` 这样的完整路径；`/` 是分类层级分隔符。搜索命中深层会话时保留祖先文件夹。
+
+终端默认选择已安装的 Consolas，并依次尝试 Cascadia Mono、Lucida Console、Courier New 和系统等宽字体；按字体及 DPI 计算字符格。终端右键菜单可打开字体、字号、样式、前景色和背景色设置；左键自动复制与右键直接粘贴也可在菜单中分别启用。
 
 点击「新建连接」或首页协议按钮，填写参数后选择「保存并连接」或「仅保存」。左侧双击已保存会话即可连接。Shell 默认使用 Windows PowerShell；也可以设置 `cmd.exe`，参数 `/Q`，或已安装的 `pwsh.exe`。
 
-快捷键：`Ctrl+N` 新建，`Ctrl+W` 关闭标签；终端内 `Ctrl+Shift+C` 复制选择内容（没有选择时复制全部），`Ctrl+Shift+V` 粘贴，鼠标滚轮查看历史。多行粘贴会要求确认。中键点击标签可关闭连接。
+快捷键：`Ctrl+N` 新建，`Ctrl+W` 关闭标签；终端内 `Ctrl+Shift+C` 复制选择内容（没有选择时复制全部），`Ctrl+Shift+V` 粘贴，鼠标滚轮查看历史。多行粘贴会要求确认。双击标签标题、点击标签右侧 ×、中键点击或使用「窗口」菜单均可关闭标签，关闭前会要求确认；退出软件时若仍有会话标签，也会确认。
 
 RDP 在系统窗口中打开，登录由 Windows 客户端处理。PortHarbor 保存的 RDP 密码不会自动注入 Windows 凭据管理器；有密码时可在标签中点击复制，30 秒后尝试清除本次复制的内容。关闭标签不会关闭远程桌面窗口。
 
 ## 数据与密码
 
-默认配置：`%LOCALAPPDATA%\PortHarbor\settings.json`。首次启动时，如果发现旧版 `%LOCALAPPDATA%\EasyConnect\settings.json` 且新目录尚无配置，会自动迁移旧配置。工具栏「配置目录」可以打开所在文件夹。写入采用临时文件加原子替换，`.bak` 保留前一次配置（其中也可能包含旧的加密密码）。损坏配置会被保留并报告错误，不会静默覆盖。
+安装版默认配置：`%LOCALAPPDATA%\PortHarbor\settings.json`。首次启动时，如果发现旧版 `%LOCALAPPDATA%\EasyConnect\settings.json` 且新目录尚无配置，会自动迁移旧配置。
 
-密码由当前 Windows 用户的 DPAPI 保护，复制配置到另一账户或电脑通常不能解密。导出功能仅输出会话参数，不含加密密码或主机信任记录；导入会分配新 ID，并关闭保存密码选项。私钥文件由用户自行保管，配置只记录其路径。
+便携版配置：程序旁的 `PortHarbor.ini`，包含 `[General]`、`[Groups]`、`[Session:ID]`、`[Vault]`、`[Credentials]` 和 `[HostKeys]` 分节。值使用 JSON 转义以保存中文、换行和特殊符号；主机密钥名称使用 Base64 编码。该格式独立设计，不兼容 MobaXterm INI。
+
+便携包带有 `PortHarbor.portable` 标记；程序旁已有 INI 也会识别为便携模式。可显式使用 `--portable` 或 `--installed`；`--data-dir <目录>` 在两种模式下都可覆盖数据目录。便携版必须放在可写目录，写入失败时提示错误，不静默切换到用户目录。现有安装版 JSON 不会自动复制到便携版；可通过不含密码的导出/导入迁移会话后重新保存密码。
+
+「设置 → 打开配置目录」可查看实际目录。写入使用临时文件与原子替换，`.bak` 保留前一次配置；首次启动便携版就会建立空 INI。损坏配置会被保留并报告错误。
+
+密码保存在对应配置的 `Credentials` 中。首次保存非空密码必须设置至少 8 位的主密码并重复确认；之后启动已有密码库时可输入主密码解锁；也可以点击“跳过”进入软件，此时已保存密码不可读取，连接时需临时输入。「设置 → 主密码」可设置或修改，修改前验证当前口令。主密码不会写入磁盘；遗忘后无法恢复密码。
+
+两版均使用主密码派生的密钥进行 AES-256-GCM 加密。安装版密码库版本 1 另外使用当前 Windows 用户的 DPAPI，因此密码绑定原账户；便携版新密码库版本 2 不使用 DPAPI，复制 INI 后可用主密码解锁，不依赖原账户。更改主密码会按当前模式重新加密全部凭据。解锁密钥仅保留在进程内存，退出清除；会话名称、主机等元数据不加密，目前没有自动锁定功能。密码库版本与配置 schema 版本是两套独立编号。
+
+旧版配置会在设置主密码时迁移到 schema v2；迁移失败保留原配置，不丢弃不可解密的旧密码。旧版程序不能读取 v2。迁移或更改主密码前形成的 `.bak`、自行复制的旧配置仍按原来的密码/DPAPI 规则保护，不会自动被新主密码重新加密；请自行保管这些备份。设计依据见[主密码保护决策](docs/adr/0001-master-password.md)。
+
+导出功能仅输出会话参数及分类，不含密码库元数据、加密密码或主机信任记录；导入会分配新 ID，并关闭保存密码选项。私钥文件由用户自行保管，配置只记录其路径。
 
 首次 SSH / SFTP 连接会显示 SHA256 主机指纹，核实后才应信任。后续指纹变化将拒绝连接；确认服务器确已更换密钥后，关闭应用，在配置文件 `HostKeys` 中移除对应条目再重新连接。Telnet 和普通 FTP 的流量不加密；FTP 显式 TLS 使用正常证书验证。
 
@@ -74,7 +94,9 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 .\build.ps1 -Dotnet 'D:\Code\rea-work\tools\dotnet\dotnet.exe' -PackageSource 'D:\Code\rea-work\tools\nuget-feed'
 ```
 
-脚本在项目内缓存构建数据，恢复依赖、编译并执行检查，然后生成自包含和框架依赖两个 x64 发行 ZIP，放在 `artifacts`。自包含包把 .NET 运行环境打入单文件；框架依赖包附带 `Start-PortHarbor.cmd` 启动检测。运行时依赖版本与哈希记录在 `src\PortHarbor\packages.lock.json`。项目结构：
+脚本在项目内缓存构建数据，恢复依赖、编译并执行检查，然后同时生成安装版目录布局和便携版 ZIP，放在 `artifacts`。默认都不包含 .NET 环境；需要包含时运行 `./build.ps1 -IncludeRuntime`。安装向导尚未实现。依赖版本与哈希见 `src\PortHarbor\packages.lock.json`。
+
+若旧发行目录中的程序仍在运行，可通过 `./build.ps1 -OutputDirectory ./artifacts/preview` 输出到独立目录，避免覆盖正在使用的文件。切换新版前先关闭旧程序，同一配置目录不要同时运行两版。
 
 ```text
 src/PortHarbor/                 界面、连接、终端及数据存储
@@ -87,7 +109,7 @@ build.ps1                       构建和发布
 
 ## 验证
 
-本次 Windows 环境检查通过 42 项：DPAPI 和会话恢复、无密码导出、SSH 密钥信任、终端控制序列、Telnet 分片协商及真实 TCP 输入、本地 ConPTY Shell、取消下载保留原文件、FTP / SFTP 中文名称及上传下载覆盖重命名删除、SSH 登录及 PTY 输入断开。另完成主窗口和七种协议编辑页的界面启动检查。
+最近一轮预览优化验证包含核心存储/终端/文件传输策略、主密码及旧配置迁移、Windows ConPTY 与生命周期，以及主窗口、协议编辑器、嵌套分类、图标、下拉菜单、等宽字体和标签鼠标关闭路径。逐次检查数量、失败修复过程和结果见 [开发日志](docs/DEVELOPMENT-LOG.md)。此前还完成过本机 FTP/SFTP/SSH/Telnet 协议回环检查；本次 UI 与密码库调整未重新运行协议服务。
 
 RDP 验证覆盖配置生成，不含真实远程桌面登录；串口尚无实体设备测试。FTPS、私钥登录和其他服务器实现也尚未完成实机互通测试。
 
@@ -122,3 +144,6 @@ PortHarbor 自有代码尚未采用开源许可证；获取仓库或预览构建
 Every development session is recorded in [`docs/DEVELOPMENT-LOG.md`](docs/DEVELOPMENT-LOG.md). Each entry includes the development scope, changed files, verification results, known problems, and the next step. Failed checks and environment limitations are recorded as well.
 
 文件传输接口、协议适配器、扩展方式及当前取消语义见 [文件传输接口与扩展约定](docs/FILE-TRANSFER.md)。
+
+
+

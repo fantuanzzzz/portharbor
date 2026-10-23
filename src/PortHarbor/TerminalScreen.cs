@@ -20,6 +20,9 @@ public sealed class TerminalScreen
     public bool BracketedPaste { get; private set; }
     public event Action<string>? Reply;
     Color fg = DefaultForeground, bg = DefaultBackground;
+    public Color ForegroundColor => fg;
+    public Color BackgroundColor => bg;
+    public void SetDefaultColors(Color foreground, Color background) { fg = foreground; bg = background; }
     int state, savedX, savedY, top, bottom;
     bool wrapPending, alternate;
     Cell[][]? primary;

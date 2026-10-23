@@ -1,5 +1,6 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Security.Cryptography;
 
 namespace PortHarbor;
 
@@ -47,34 +48,44 @@ public sealed record Session
 
 public sealed class AppData
 {
-    public int SchemaVersion { get; set; } = 1;
+    public int SchemaVersion { get; set; } = 2;
+    public List<string> Groups { get; set; } = [];
+    public VaultSettings? Vault { get; set; }
     public List<Session> Sessions { get; set; } = [];
     public Dictionary<string, string> Credentials { get; set; } = [];
     public Dictionary<string, string> HostKeys { get; set; } = [];
 }
 
-public sealed class Store
+public sealed class Store : IDisposable
 {
     public static readonly JsonSerializerOptions Json = new() { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };
     public string DirectoryPath { get; }
-    public string FilePath => Path.Combine(DirectoryPath, "settings.json");
+    public bool IsPortable { get; }
+    public string FilePath => Path.Combine(DirectoryPath, IsPortable ? "PortHarbor.ini" : "settings.json");
     public AppData Data { get; private set; }
     private readonly object gate = new();
-    public Store(string? directory = null)
+    byte[]? vaultKey;
+    public bool HasMasterPassword => Data.Vault != null;
+    public bool IsVaultUnlocked => vaultKey != null;
+    public Store(string? directory = null, bool portable = false)
     {
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        DirectoryPath = directory ?? Path.Combine(localAppData, "PortHarbor");
+        IsPortable = portable;
+        DirectoryPath = directory ?? (portable ? AppContext.BaseDirectory : Path.Combine(localAppData, "PortHarbor"));
         Directory.CreateDirectory(DirectoryPath);
         // Keep the old directory as a one-time migration source for existing users.
         var legacySettings = Path.Combine(localAppData, "EasyConnect", "settings.json");
-        if (directory == null && !File.Exists(FilePath) && File.Exists(legacySettings)) File.Copy(legacySettings, FilePath);
+        if (!portable && directory == null && !File.Exists(FilePath) && File.Exists(legacySettings)) File.Copy(legacySettings, FilePath);
         Data = File.Exists(FilePath) ? Read(FilePath) : new();
+        if (portable && !File.Exists(FilePath)) Save();
     }
     static AppData Read(string path)
     {
-        var data = JsonSerializer.Deserialize<AppData>(File.ReadAllText(path), Json) ?? throw new InvalidDataException("配置为空。");
-        if (data.SchemaVersion != 1) throw new InvalidDataException("不支持此配置版本。原文件已保留。");
-        if (data.Sessions == null || data.Credentials == null || data.HostKeys == null) throw new InvalidDataException("配置结构损坏。原文件已保留。");
+        var data = (Path.GetExtension(path).Equals(".ini", StringComparison.OrdinalIgnoreCase) ? IniConfiguration.Read(File.ReadAllText(path)) : JsonSerializer.Deserialize<AppData>(File.ReadAllText(path), Json)) ?? throw new InvalidDataException("配置为空。");
+        if (data.SchemaVersion is not (1 or 2)) throw new InvalidDataException("不支持此配置版本。原文件已保留。");
+        if (data.Sessions == null || data.Credentials == null || data.HostKeys == null || data.Groups == null) throw new InvalidDataException("配置结构损坏。原文件已保留。");
+        if (data.SchemaVersion == 2 && data.Credentials.Count > 0 && data.Vault == null) throw new InvalidDataException("密码库元数据缺失。原文件已保留。");
+        if (data.Groups.Any(g => string.IsNullOrWhiteSpace(g) || g.Any(char.IsControl))) throw new InvalidDataException("分类数据损坏。原文件已保留。");
         foreach (var s in data.Sessions) s.Validate();
         if (data.Sessions.Select(s => s.Id).Distinct().Count() != data.Sessions.Count) throw new InvalidDataException("会话 ID 重复。");
         return data;
@@ -86,7 +97,8 @@ public sealed class Store
             var temp = FilePath + ".tmp";
             using (var f = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None))
             {
-                JsonSerializer.Serialize(f, Data, Json);
+                if (IsPortable) { var bytes = System.Text.Encoding.UTF8.GetBytes(IniConfiguration.Write(Data)); f.Write(bytes); }
+                else JsonSerializer.Serialize(f, Data, Json);
                 f.Flush(true);
             }
             if (File.Exists(FilePath)) File.Replace(temp, FilePath, FilePath + ".bak");
@@ -95,14 +107,89 @@ public sealed class Store
     }
     public string GetPassword(Guid id)
     {
-        lock (gate) return Data.Credentials.TryGetValue(id.ToString(), out var encrypted) ? SecretProtection.Unprotect(encrypted) : "";
+        lock (gate)
+        {
+            if (!Data.Credentials.TryGetValue(id.ToString(), out var encrypted)) return "";
+            if (Data.Vault == null) throw new InvalidOperationException("请先设置主密码并迁移旧密码。");
+            var inner = PasswordVault.Decrypt(encrypted, RequireVaultKey(), id.ToString());
+            return Data.Vault.Version == 1 ? SecretProtection.Unprotect(inner) : inner;
+        }
+    }
+
+    byte[] RequireVaultKey() => vaultKey ?? throw new InvalidOperationException("密码库尚未解锁。");
+
+    public void UnlockVault(string password)
+    {
+        lock (gate)
+        {
+            var settings = Data.Vault ?? throw new InvalidOperationException("尚未设置主密码。");
+            byte[] key = PasswordVault.Derive(password, settings);
+            try
+            {
+                if (PasswordVault.Decrypt(settings.Verification, key, PasswordVault.VerificationContext) != PasswordVault.VerificationContext)
+                    throw new CryptographicException("密码库校验失败。");
+            }
+            catch { CryptographicOperations.ZeroMemory(key); throw; }
+            LockVault(); vaultKey = key;
+        }
+    }
+
+    public void SetMasterPassword(string password)
+    {
+        if (password.Length < 8) throw new ArgumentException("主密码至少需要 8 个字符。");
+        lock (gate)
+        {
+            var previousVault = Data.Vault;
+            if (previousVault != null) _ = RequireVaultKey();
+            var previousCredentials = Data.Credentials;
+            int previousSchema = Data.SchemaVersion;
+            var settings = new VaultSettings { Version = IsPortable ? 2 : 1, Salt = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)) };
+            byte[] key = PasswordVault.Derive(password, settings);
+            try
+            {
+                var credentials = new Dictionary<string, string>();
+                foreach (var (id, encrypted) in previousCredentials)
+                {
+                    string inner = previousVault == null ? encrypted : PasswordVault.Decrypt(encrypted, RequireVaultKey(), id);
+                    // Decode the original protection before changing the storage mode.
+                    string plaintext = previousVault == null || previousVault.Version == 1 ? SecretProtection.Unprotect(inner) : inner;
+                    credentials[id] = PasswordVault.Encrypt(settings.Version == 1 ? SecretProtection.Protect(plaintext) : plaintext, key, id);
+                }
+                settings.Verification = PasswordVault.Encrypt(PasswordVault.VerificationContext, key, PasswordVault.VerificationContext);
+                Data.Vault = settings; Data.Credentials = credentials; Data.SchemaVersion = 2;
+                try { Save(); }
+                catch { Data.Vault = previousVault; Data.Credentials = previousCredentials; Data.SchemaVersion = previousSchema; throw; }
+                LockVault(); vaultKey = key;
+            }
+            catch { CryptographicOperations.ZeroMemory(key); throw; }
+        }
+    }
+
+    public void LockVault()
+    {
+        lock (gate) { if (vaultKey != null) CryptographicOperations.ZeroMemory(vaultKey); vaultKey = null; }
+    }
+    public void Dispose() => LockVault();
+
+    public void AddGroup(string name)
+    {
+        name = name.Trim();
+        if (name.Length == 0 || name.Any(char.IsControl) || name.Split('/').Any(part => string.IsNullOrWhiteSpace(part) || part != part.Trim() || part is "." or "..") || name.Contains('\\')) throw new ArgumentException("请输入有效的分类名称。");
+        lock (gate)
+        {
+            if (name == "默认" || Data.Groups.Concat(Data.Sessions.Select(s => s.Group)).Contains(name, StringComparer.OrdinalIgnoreCase))
+                throw new ArgumentException("该分类已存在。");
+            Data.Groups.Add(name);
+            try { Save(); } catch { Data.Groups.Remove(name); throw; }
+        }
     }
     public void PutSession(Session session, string password)
     {
         lock (gate)
         {
             session.Validate();
-            var encrypted = session.SavePassword && password.Length > 0 ? SecretProtection.Protect(password) : null;
+            var encrypted = session.SavePassword && password.Length > 0
+                ? PasswordVault.Encrypt(Data.Vault?.Version == 2 ? password : SecretProtection.Protect(password), RequireVaultKey(), session.Id.ToString()) : null;
             Data.Sessions.RemoveAll(s => s.Id == session.Id);
             Data.Sessions.Add(session);
             if (encrypted != null) Data.Credentials[session.Id.ToString()] = encrypted;
@@ -139,12 +226,14 @@ public sealed class Store
             return true;
         }
     }
-    public void Export(string path) => File.WriteAllText(path, JsonSerializer.Serialize(new AppData { Sessions = Data.Sessions.Select(s => s with { SavePassword = false }).ToList() }, Json));
+    public void Export(string path) => File.WriteAllText(path, JsonSerializer.Serialize(new AppData { Groups = Data.Groups.ToList(), Sessions = Data.Sessions.Select(s => s with { SavePassword = false }).ToList() }, Json));
     public int Import(string path)
     {
         var imported = Read(path);
+        Data.Groups = Data.Groups.Concat(imported.Groups).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         foreach (var s in imported.Sessions) Data.Sessions.Add(s with { Id = Guid.NewGuid(), SavePassword = false });
         Save();
         return imported.Sessions.Count;
     }
 }
+

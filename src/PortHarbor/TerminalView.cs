@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Text;
 
 namespace PortHarbor;
@@ -8,24 +8,82 @@ public sealed class TerminalView : Control
     public TerminalScreen Screen { get; } = new();
     public event Action<byte[]>? Input;
     public event Action<int, int>? TerminalResized;
+    readonly Font terminalFont;
     readonly ConcurrentQueue<string> output = new();
     readonly System.Windows.Forms.Timer timer = new() { Interval = 33 };
     int cw = 9, ch = 18, scroll;
+    readonly VScrollBar scrollbar = new() { Dock = DockStyle.Right, Width = 18 };
+    public event Action<Font>? FontChangedByUser;
+    public bool CopyOnSelection { get; private set; }
+    public bool PasteOnRightClick { get; private set; }
     Point? selectionStart, selectionEnd;
     public TerminalView()
     {
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.Selectable, true);
         BackColor = TerminalScreen.DefaultBackground; ForeColor = TerminalScreen.DefaultForeground;
-        Font = new Font("Cascadia Mono", 11); TabStop = true;
+        Font = terminalFont = CreateTerminalFont(); TabStop = true;
         Screen.Reply += Send;
-        timer.Tick += (_, _) => { var b = new StringBuilder(); while (b.Length < 200000 && output.TryDequeue(out var text)) b.Append(text); if (b.Length > 0) { Screen.Feed(b.ToString()); Invalidate(); } };
+        timer.Tick += (_, _) => { var b = new StringBuilder(); while (b.Length < 200000 && output.TryDequeue(out var text)) b.Append(text); if (b.Length > 0) { Screen.Feed(b.ToString()); SyncScrollbar(); Invalidate(); } };
         timer.Start();
+        scrollbar.Scroll += (_, _) => { scroll = ScrollMaximum - scrollbar.Value; Invalidate(); };
+        Controls.Add(scrollbar);
         var menu = new ContextMenuStrip();
         menu.Items.Add("复制选择 / 全部  Ctrl+Shift+C", null, (_, _) => Copy());
         menu.Items.Add("粘贴  Ctrl+Shift+V", null, (_, _) => Paste());
+        var copyOnSelection = new ToolStripMenuItem("左键选取后自动复制") { CheckOnClick = true };
+        copyOnSelection.CheckedChanged += (_, _) => CopyOnSelection = copyOnSelection.Checked;
+        menu.Items.Add(copyOnSelection);
+        var pasteOnRightClick = new ToolStripMenuItem("右键直接粘贴") { CheckOnClick = true };
+        pasteOnRightClick.CheckedChanged += (_, _) => PasteOnRightClick = pasteOnRightClick.Checked;
+        menu.Items.Add(pasteOnRightClick);
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("终端字体…", null, (_, _) => ConfigureAppearance());
+        menu.Items.Add("终端配色…", null, (_, _) => ConfigureColors());
         ContextMenuStrip = menu;
     }
+    internal static Font CreateTerminalFont()
+    {
+        using var installed = new System.Drawing.Text.InstalledFontCollection();
+        foreach (string name in new[] { "Consolas", "Cascadia Mono", "Lucida Console", "Courier New" })
+            if (installed.Families.Any(f => f.Name.Equals(name, StringComparison.OrdinalIgnoreCase))) return new Font(name, 11);
+        return new Font(FontFamily.GenericMonospace, 11);
+    }
+    protected override void OnFontChanged(EventArgs e) { base.OnFontChanged(e); RecalculateCells(); }
+    protected override void OnDpiChangedAfterParent(EventArgs e) { base.OnDpiChangedAfterParent(e); RecalculateCells(); }
+    void RecalculateCells()
+    {
+        var size = TextRenderer.MeasureText(new string('M', 80), Font, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+        cw = Math.Max(1, (int)Math.Round(size.Width / 80.0)); ch = Math.Max(1, size.Height + (int)Math.Ceiling(DeviceDpi / 96.0));
+        if (Screen == null) return;
+        int cols = Math.Max(10, (Width - 12) / cw), rows = Math.Max(3, (Height - 8) / ch);
+        Screen.Resize(cols, rows); SyncScrollbar(); TerminalResized?.Invoke(cols, rows); Invalidate();
+    }
     public void Append(string text) => output.Enqueue(text);
+    void SyncScrollbar()
+    {
+        scrollbar.Maximum = Math.Max(0, Screen.History.Count + Screen.Rows - 1);
+        scrollbar.LargeChange = Math.Max(1, Screen.Rows);
+        scrollbar.SmallChange = 3;
+        scrollbar.Value = Math.Clamp(ScrollMaximum - scroll, scrollbar.Minimum, ScrollMaximum);
+    }
+    int ScrollMaximum => Math.Max(0, scrollbar.Maximum - scrollbar.LargeChange + 1);
+    void ConfigureAppearance()
+    {
+        using var dialog = new FontDialog { Font = Font, ShowColor = false };
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        Font = new Font(dialog.Font.FontFamily, dialog.Font.Size, dialog.Font.Style, GraphicsUnit.Point);
+        FontChangedByUser?.Invoke(Font);
+    }
+    void ConfigureColors()
+    {
+        using var foreground = new ColorDialog { Color = Screen.ForegroundColor, FullOpen = true };
+        if (foreground.ShowDialog(this) != DialogResult.OK) return;
+        using var background = new ColorDialog { Color = Screen.BackgroundColor, FullOpen = true };
+        if (background.ShowDialog(this) != DialogResult.OK) return;
+        Screen.SetDefaultColors(foreground.Color, background.Color);
+        ForeColor = foreground.Color; BackColor = background.Color; Invalidate();
+    }
+
     void Send(string value) { scroll = 0; selectionStart = selectionEnd = null; Input?.Invoke(Encoding.UTF8.GetBytes(value)); Invalidate(); }
     public void Copy()
     {
@@ -68,17 +126,13 @@ public sealed class TerminalView : Control
     protected override void OnResize(EventArgs e)
     {
         base.OnResize(e);
-        var size = TextRenderer.MeasureText("M", Font, Size.Empty, TextFormatFlags.NoPadding);
-        cw = Math.Max(1, size.Width); ch = Math.Max(1, size.Height + 1);
-        Screen.Resize(Math.Max(10, (Width - 12) / cw), Math.Max(2, (Height - 8) / ch));
-        selectionStart = selectionEnd = null; scroll = 0;
-        TerminalResized?.Invoke(Screen.Columns, Screen.Rows); Invalidate();
+        RecalculateCells();
     }
-    protected override void OnMouseWheel(MouseEventArgs e) { scroll = Math.Clamp(scroll + (e.Delta > 0 ? 3 : -3), 0, Screen.History.Count); Invalidate(); base.OnMouseWheel(e); }
+    protected override void OnMouseWheel(MouseEventArgs e) { scroll = Math.Clamp(scroll + (e.Delta > 0 ? 3 : -3), 0, Screen.History.Count); SyncScrollbar(); Invalidate(); base.OnMouseWheel(e); }
     Point CellAt(Point p) => new(Math.Clamp((p.X - 6) / cw, 0, Screen.Columns - 1), Math.Max(0, Screen.History.Count - scroll + Math.Clamp((p.Y - 4) / ch, 0, Screen.Rows - 1)));
-    protected override void OnMouseDown(MouseEventArgs e) { Focus(); if (e.Button == MouseButtons.Left) { selectionStart = selectionEnd = CellAt(e.Location); Capture = true; Invalidate(); } base.OnMouseDown(e); }
+    protected override void OnMouseDown(MouseEventArgs e) { Focus(); if (e.Button == MouseButtons.Right && PasteOnRightClick) { Paste(); return; } if (e.Button == MouseButtons.Left) { selectionStart = selectionEnd = CellAt(e.Location); Capture = true; Invalidate(); } base.OnMouseDown(e); }
     protected override void OnMouseMove(MouseEventArgs e) { if (Capture && selectionStart != null) { selectionEnd = CellAt(e.Location); Invalidate(); } base.OnMouseMove(e); }
-    protected override void OnMouseUp(MouseEventArgs e) { Capture = false; base.OnMouseUp(e); }
+    protected override void OnMouseUp(MouseEventArgs e) { if (e.Button == MouseButtons.Left && CopyOnSelection && selectionStart != null && selectionEnd != null) Copy(); Capture = false; base.OnMouseUp(e); }
     protected override void OnPaint(PaintEventArgs e)
     {
         e.Graphics.Clear(BackColor);
@@ -104,5 +158,8 @@ public sealed class TerminalView : Control
         }
         if (Focused && scroll == 0 && Screen.CursorVisible) { using var pen = new Pen(Color.LightSkyBlue, 2); e.Graphics.DrawLine(pen, 6 + Screen.X * cw, 4 + (Screen.Y + 1) * ch - 2, 6 + (Screen.X + 1) * cw - 1, 4 + (Screen.Y + 1) * ch - 2); }
     }
-    protected override void Dispose(bool disposing) { if (disposing) { timer.Dispose(); ContextMenuStrip?.Dispose(); } base.Dispose(disposing); }
+    protected override void Dispose(bool disposing) { if (disposing) { timer.Dispose(); terminalFont.Dispose(); scrollbar.Dispose(); ContextMenuStrip?.Dispose(); } base.Dispose(disposing); }
 }
+
+
+

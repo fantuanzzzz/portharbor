@@ -1,4 +1,4 @@
-using System.IO.Ports;
+﻿using System.IO.Ports;
 
 namespace PortHarbor;
 
@@ -14,9 +14,9 @@ public sealed class SessionEditor : Form
     readonly Dictionary<string, (Control label, Control field)> rows = [];
     readonly ComboBox protocol = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 320 };
     readonly TextBox password = new() { UseSystemPasswordChar = true };
-    readonly CheckBox savePassword = new() { Text = "保存密码（仅当前 Windows 用户可解密）", AutoSize = true };
+    readonly CheckBox savePassword = new() { Text = "保存密码（主密码 + Windows 用户加密）", AutoSize = true };
     readonly CheckBox persist = new() { Text = "保存此会话", Checked = true, AutoSize = true };
-    public SessionEditor(Session? session = null, string secret = "")
+    public SessionEditor(Session? session = null, string secret = "", IEnumerable<string>? groups = null)
     {
         original = session ?? new(); Result = original with { };
         Text = session == null ? "新建连接" : "编辑会话";
@@ -25,7 +25,10 @@ public sealed class SessionEditor : Form
         BackColor = Color.FromArgb(247, 249, 252);
         var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true }; scroll.Controls.Add(fields);
         fields.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 155)); fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        AddText("Name", "会话名称", original.Name); AddText("Group", "分组", original.Group);
+        AddText("Name", "会话名称", original.Name);
+        var group = new ComboBox { DropDownStyle = ComboBoxStyle.DropDown };
+        group.Items.AddRange((groups ?? []).Append("默认").Append(original.Group).Where(g => !string.IsNullOrWhiteSpace(g)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(g => g).Cast<object>().ToArray());
+        group.Text = original.Group; Add("Group", "分类", group);
         protocol.Items.AddRange(Enum.GetNames<Protocol>()); protocol.SelectedItem = original.Protocol.ToString(); Add("Protocol", "连接类型", protocol);
         AddText("Host", "主机 / IP", original.Host); AddNumber("Port", "端口", original.Port, 1, 65535);
         AddText("Username", "用户名 / 域\\用户名", original.Username);
@@ -105,4 +108,17 @@ public static class TextPrompt
         form.Controls.AddRange([ok, cancel]); form.AcceptButton = ok; form.CancelButton = cancel;
         return form.ShowDialog(owner) == DialogResult.OK ? text.Text : null;
     }
+
+    public static string? AskWithSkip(IWin32Window owner, string title, string label, string initial = "", bool secret = false)
+    {
+        using var form = new Form { Text = title, Size = new Size(460, 180), StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, Font = new Font("Microsoft YaHei UI", 9) };
+        var text = new TextBox { Text = initial, UseSystemPasswordChar = secret, Left = 20, Top = 50, Width = 400 };
+        form.Controls.Add(new Label { Text = label, Left = 20, Top = 18, AutoSize = true }); form.Controls.Add(text);
+        var ok = new Button { Text = "确定", DialogResult = DialogResult.OK, Left = 175, Top = 88 };
+        var skip = new Button { Text = "跳过", DialogResult = DialogResult.Ignore, Left = 260, Top = 88 };
+        var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, Left = 345, Top = 88 };
+        form.Controls.AddRange([ok, skip, cancel]); form.AcceptButton = ok; form.CancelButton = cancel;
+        return form.ShowDialog(owner) switch { DialogResult.OK => text.Text, DialogResult.Ignore => "", _ => null };
+    }
 }
+

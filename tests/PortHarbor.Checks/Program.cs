@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using PortHarbor;
@@ -22,7 +22,7 @@ internal static partial class Program
             string? configPath = Option(args, "--integration");
             if (args.Contains("--unit"))
             {
-                Storage(root); Terminal(); Telnet(); Transfer(root); FileDiagnostics(root); FileTransferContract(root);
+                Storage(root); VaultAndGroups(root); Terminal(); Telnet(); Transfer(root); FileDiagnostics(root); FileTransferContract(root);
             }
             else if (args.Contains("--windows"))
             {
@@ -68,13 +68,37 @@ internal static partial class Program
     static void Ui(string root, string output)
     {
         InitializeUi();
-        using var form = new MainForm(new Store(Path.Combine(root,"ui")));
+        using var uiStore = new Store(Path.Combine(root,"ui"));
+        uiStore.AddGroup("空分类");
+        uiStore.AddGroup("Work/Switches/Core");
+        uiStore.PutSession(new Session { Name = "Nested terminal", Host = "nested-test-host", Group = "Work/Switches/Core" }, "");
+        using var form = new MainForm(uiStore);
         form.Show(); Application.DoEvents();
         using var bitmap = new System.Drawing.Bitmap(form.Width,form.Height); form.DrawToBitmap(bitmap,form.ClientRectangle); bitmap.Save(output);
         Check(form.Visible && form.Controls.Count>0,"main window renders without error");
         foreach(var p in Enum.GetValues<Protocol>()) { using var editor = new SessionEditor(new Session { Protocol=p,Port=Session.DefaultPort(p) }); editor.Show(); Application.DoEvents(); editor.Close(); }
-        Check(true,"all seven protocol editors open without error"); form.Close();
+        Check(true,"all seven protocol editors open without error");
+        var tree = FindControl<TreeView>(form);
+        Check(tree.Nodes.Cast<TreeNode>().Any(n => n.Text == "空分类" && n.Nodes.Count == 0), "sidebar renders saved empty category");
+        var tabs = FindControl<TabControl>(form);
+        var first = new TabPage("first"); var second = new TabPage("second");
+        tabs.TabPages.Add(first); tabs.TabPages.Add(second); tabs.SelectedTab = second;
+        form.CloseTab(first, () => false);
+        Check(tabs.TabPages.Contains(first) && !first.IsDisposed, "declined tab close preserves target page");
+        form.CloseTab(first, () => true);
+        Check(first.IsDisposed && tabs.TabPages.Contains(second) && tabs.SelectedTab == second, "confirmed tab close disposes requested page and preserves other tab");
+        form.Close();
+        TabMouseUi();
         FileTransferUi();
+    }
+    static T FindControl<T>(Control parent) where T : Control
+    {
+        foreach (Control child in parent.Controls)
+        {
+            if (child is T found) return found;
+            try { return FindControl<T>(child); } catch (InvalidOperationException) { }
+        }
+        throw new InvalidOperationException("Control not found: " + typeof(T).Name);
     }
     static async Task SshRoundTrip(string root,string configPath)
     {
@@ -90,10 +114,12 @@ internal static partial class Program
     {
         var store = new Store(Path.Combine(root, "store")); var s = new Session { Name = "测试 Linux", Host = "127.0.0.1", SavePassword = true };
         const string secret = "secret-中文-!@#$-123";
+        store.SetMasterPassword("test-master-password");
         store.PutSession(s, secret);
         Check(!File.ReadAllText(store.FilePath).Contains(secret), "credentials are encrypted on disk");
         var restarted = new Store(store.DirectoryPath);
-        Check(restarted.GetPassword(s.Id) == secret && restarted.Data.Sessions.Single().Name == s.Name, "restart restores session and DPAPI credential");
+        restarted.UnlockVault("test-master-password");
+        Check(restarted.GetPassword(s.Id) == secret && restarted.Data.Sessions.Single().Name == s.Name, "restart restores session and master-password protected DPAPI credential");
         restarted.PutSession(s with { Name = "Renamed", Group = "工作" }, secret);
         Check(File.Exists(store.FilePath + ".bak"), "atomic save preserves previous backup");
         string export = Path.Combine(root, "export.json"); restarted.Export(export);
@@ -234,3 +260,4 @@ internal static partial class Program
         }
     }
 }
+

@@ -1,4 +1,4 @@
-param([string]$Dotnet = 'dotnet', [string]$PackageSource = '')
+param([string]$Dotnet = 'dotnet', [string]$PackageSource = '', [switch]$IncludeRuntime, [string]$OutputDirectory = '')
 $ErrorActionPreference = 'Stop'
 $env:DOTNET_CLI_HOME = Join-Path $PSScriptRoot '.build-home'
 $env:NUGET_PACKAGES = Join-Path $PSScriptRoot '.packages'
@@ -9,24 +9,24 @@ $version = '0.1.0'
 $rid = 'win-x64'
 $project = Join-Path $PSScriptRoot 'src\PortHarbor\PortHarbor.csproj'
 $checks = Join-Path $PSScriptRoot 'tests\PortHarbor.Checks\PortHarbor.Checks.csproj'
-$artifacts = Join-Path $PSScriptRoot 'artifacts'
+$artifacts = if ($OutputDirectory) { [System.IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $PSScriptRoot 'artifacts' }
 $portable = Join-Path $artifacts 'portable-win-x64'
-$framework = Join-Path $artifacts 'framework-win-x64'
+$framework = Join-Path $artifacts 'installed-win-x64'
 $portableZip = Join-Path $artifacts "PortHarbor-$version-portable-$rid.zip"
-$frameworkZip = Join-Path $artifacts "PortHarbor-$version-framework-$rid.zip"
+$frameworkZip = Join-Path $artifacts "PortHarbor-$version-installed-$rid.zip"
 $config = Join-Path $PSScriptRoot 'NuGet.Config'
 $staging = Join-Path $artifacts ('.staging-' + [guid]::NewGuid().ToString('N'))
 $backup = Join-Path $staging 'previous'
 $stagePortable = Join-Path $staging 'portable-win-x64'
-$stageFramework = Join-Path $staging 'framework-win-x64'
+$stageFramework = Join-Path $staging 'installed-win-x64'
 $stagePortableZip = Join-Path $staging "PortHarbor-$version-portable-$rid.zip"
-$stageFrameworkZip = Join-Path $staging "PortHarbor-$version-framework-$rid.zip"
+$stageFrameworkZip = Join-Path $staging "PortHarbor-$version-installed-$rid.zip"
 $targets = @(
-    @{ Staged = $stagePortable; Target = $portable; Directory = $true }
     @{ Staged = $stageFramework; Target = $framework; Directory = $true }
-    @{ Staged = $stagePortableZip; Target = $portableZip; Directory = $false }
     @{ Staged = $stageFrameworkZip; Target = $frameworkZip; Directory = $false }
 )
+$targets += @{ Staged = $stagePortable; Target = $portable; Directory = $true }
+$targets += @{ Staged = $stagePortableZip; Target = $portableZip; Directory = $false }
 $installed = [System.Collections.Generic.List[string]]::new()
 
 try {
@@ -38,19 +38,19 @@ try {
     & $Dotnet build $checks -c Release --no-restore
     if ($LASTEXITCODE) { throw 'Build failed' }
     foreach ($suite in @('--unit', '--windows')) {
-        & $Dotnet run --project $checks -c Release --no-build -- $suite --results (Join-Path $staging (($suite.TrimStart('-')) + '-results.json'))
+        & $Dotnet run --project $checks -c Release --no-build -- $suite --results (Join-Path $artifacts (($suite.TrimStart('-')) + '-results.json'))
         if ($LASTEXITCODE) { throw "Checks failed: $suite" }
     }
 
-    & $Dotnet publish $project -c Release --no-restore -r $rid --self-contained true `
-        -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
-        -p:EnableCompressionInSingleFile=true -p:DebugType=None -p:DebugSymbols=false -o $stagePortable
-    if ($LASTEXITCODE) { throw 'Portable publish failed' }
-    & $Dotnet publish $project -c Release --no-restore -r $rid --self-contained false -o $stageFramework
-    if ($LASTEXITCODE) { throw 'Framework-dependent publish failed' }
+    $runtimeMode = if ($IncludeRuntime) { 'true' } else { 'false' }
+    & $Dotnet publish $project -c Release --no-restore -r $rid --self-contained $runtimeMode -o $stageFramework
+    if ($LASTEXITCODE) { throw 'Publish failed' }
+    Copy-Item -Path (Join-Path $stageFramework '*') -Destination $stagePortable -Recurse -Force
+    Set-Content -LiteralPath (Join-Path $stagePortable 'PortHarbor.portable') -Value 'Portable configuration: PortHarbor.ini beside the executable.' -Encoding UTF8
 
     $docs = @('README.md', 'THIRD-PARTY-NOTICES.md') | ForEach-Object { Join-Path $PSScriptRoot $_ }
-    foreach ($destination in @($stagePortable, $stageFramework)) {
+    $destinations = @($stageFramework, $stagePortable)
+    foreach ($destination in $destinations) {
         Copy-Item -LiteralPath $docs -Destination $destination -Force
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'licenses') -Destination $destination -Recurse -Force
     }
@@ -70,7 +70,7 @@ try {
     }
     Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
     Write-Host "Portable: $portableZip"
-    Write-Host "Framework-dependent: $frameworkZip"
+    Write-Host "Installed layout (installer pending): $frameworkZip"
 }
 catch {
     foreach ($path in $installed) {
