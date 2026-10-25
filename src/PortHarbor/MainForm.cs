@@ -10,6 +10,7 @@ public sealed class MainForm : Form
     readonly ConnectionTabs tabs = new();
     readonly Dictionary<TabPage, IDisposable> connections = [];
     readonly ToolStripStatusLabel status = new() { Text = "就绪", Spring = true, TextAlign = ContentAlignment.MiddleLeft };
+    bool shutdownPending, closeReady;
     public MainForm(Store store)
     {
         this.store = store;
@@ -51,14 +52,27 @@ public sealed class MainForm : Form
         context.Items.Add("编辑", null, (_, _) => { if (Selected is { } s) Guard(() => Edit(s)); });
         context.Items.Add("复制会话", null, (_, _) => { if (Selected is { } s) Guard(() => Edit(s with { Id = Guid.NewGuid(), Name = s.Name + " 副本", SavePassword = false })); });
         context.Items.Add("删除会话及其密码", null, (_, _) => Guard(Delete)); tree.ContextMenuStrip = context;
-        tabs.CloseRequested += page => CloseTab(page);
+        tabs.CloseRequested += async page => await CloseTab(page);
         RefreshTree(); Welcome();
-        FormClosing += (_, e) =>
+        FormClosing += async (_, e) =>
         {
+            if (closeReady) return;
+            e.Cancel = true;
+            if (shutdownPending) return;
             if (tabs.TabPages.Cast<TabPage>().Any(p => p.Tag is Session) && MessageBox.Show(this, "关闭软件并断开所有内嵌连接？\n外部远程桌面窗口不会随之关闭。", "确认退出", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
-            { e.Cancel = true; return; }
-            foreach (var connection in connections.Values) connection.Dispose();
-            store.LockVault();
+                return;
+            shutdownPending = true;
+            try
+            {
+                foreach (var page in tabs.TabPages.Cast<TabPage>())
+                    if (page.Controls.OfType<FileView>().FirstOrDefault() is { } files) await files.CloseAsync();
+                foreach (var connection in connections.Values)
+                    if (connection is not FileView) connection.Dispose();
+                store.LockVault();
+                closeReady = true;
+                Close();
+            }
+            finally { shutdownPending = false; }
         };
     }
     void Guard(Action action) { try { action(); } catch (Exception e) { MessageBox.Show(this, e.Message, "PortHarbor", MessageBoxButtons.OK, MessageBoxIcon.Error); } }
@@ -220,16 +234,18 @@ public sealed class MainForm : Form
     {
         if (Selected is { } s && MessageBox.Show(this, "删除会话及已保存的密码？\n" + s.Name, "删除会话", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes) { store.Delete(s.Id); RefreshTree(); }
     }
-    void CloseTab()
+    async void CloseTab()
     {
         if (tabs.SelectedTab is not { } page) return;
-        CloseTab(page);
+        await CloseTab(page);
     }
-    internal void CloseTab(TabPage page, Func<bool>? confirm = null)
+    internal async Task CloseTab(TabPage page, Func<bool>? confirm = null)
     {
         if (!tabs.TabPages.Contains(page)) return;
         if (!(confirm?.Invoke() ?? (MessageBox.Show(this, $"关闭标签“{page.Text}”？\n内嵌连接会断开，正在进行的文件操作将取消。\n外部远程桌面窗口不会随之关闭。", "确认关闭", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes))) return;
-        if (connections.Remove(page, out var connection)) connection.Dispose();
+        if (page.Controls.OfType<FileView>().FirstOrDefault() is { } files) await files.CloseAsync();
+        if (!tabs.TabPages.Contains(page)) return;
+        if (connections.Remove(page, out var connection) && connection is not FileView) connection.Dispose();
         tabs.TabPages.Remove(page); page.Dispose();
         if (tabs.TabCount == 0) Welcome();
     }

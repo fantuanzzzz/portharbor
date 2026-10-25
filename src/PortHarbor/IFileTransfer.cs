@@ -3,23 +3,27 @@ namespace PortHarbor;
 public sealed record RemoteEntry(string Name, string Path, bool Directory, long Size, DateTime Modified);
 
 /// <summary>
-/// Protocol-independent file operations. Calls are synchronous and must be serialized by the caller.
-/// Transfer progress is the cumulative byte count; cancellation is checked between data blocks.
+/// Protocol-independent asynchronous file operations. Operations on one connection are serialized.
 /// </summary>
-public interface IFileTransfer : IDisposable
+public interface IFileTransfer : IAsyncDisposable
 {
     Guid OperationId { get; }
     ConnectionState State { get; }
     event Action<ConnectionDiagnostic>? Diagnostic;
-    void Connect();
-    List<RemoteEntry> List(string path);
-    bool Exists(string path);
-    void Download(string remote, string local, CancellationToken token, Action<long> progress);
-    void Upload(string local, string remote, CancellationToken token, Action<long> progress);
-    void Mkdir(string path);
-    void Rename(string source, string dest);
-    void Delete(RemoteEntry entry);
+    Task ConnectAsync(CancellationToken token, TimeSpan timeout);
+    Task<IReadOnlyList<RemoteEntry>> ListAsync(string path, CancellationToken token, TimeSpan timeout);
+    Task<bool> ExistsAsync(string path, CancellationToken token, TimeSpan timeout);
+    Task DownloadAsync(string remote, string local, CancellationToken token, TimeSpan timeout, IProgress<TransferProgress>? progress = null);
+    Task UploadAsync(string local, string remote, CancellationToken token, TimeSpan timeout, IProgress<TransferProgress>? progress = null);
+    Task MkdirAsync(string path, CancellationToken token, TimeSpan timeout);
+    Task RenameAsync(string source, string dest, CancellationToken token, TimeSpan timeout);
+    Task DeleteAsync(RemoteEntry entry, CancellationToken token, TimeSpan timeout);
 }
+
+public enum TransferDirection { Download, Upload }
+
+/// <summary>Progress for a single transfer operation; byte counts are cumulative.</summary>
+public sealed record TransferProgress(TransferDirection Direction, long BytesTransferred, long? TotalBytes);
 
 public static class FileTransferFactory
 {

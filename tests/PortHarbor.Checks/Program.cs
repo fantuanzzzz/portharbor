@@ -7,6 +7,18 @@ namespace PortHarbor.Checks;
 
 internal static partial class Program
 {
+    sealed class CallbackProgress<T>(Action<T> callback) : IProgress<T>
+    {
+        public void Report(T value) => callback(value);
+    }
+
+    static async Task CheckThrowsAsync<T>(Func<Task> action) where T : Exception
+    {
+        try { await action().ConfigureAwait(false); }
+        catch (T) { return; }
+        throw new Exception("Expected " + typeof(T).Name + " to be thrown.");
+    }
+
     static int passed;
     static readonly List<string> results = [];
     static void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); passed++; results.Add(name); Console.WriteLine("PASS: " + name); }
@@ -17,12 +29,12 @@ internal static partial class Program
         string? failure = null;
         try
         {
-            if (args.Length > 0 && args[0] == "--ui") { Ui(root, args[1]); return 0; }
+            if (args.Length > 0 && args[0] == "--ui") { await Ui(root, args[1]); return 0; }
             if (args.Length > 0 && args[0] == "--ui-shell") { UiShell.Run(root, args[1]); return 0; }
             string? configPath = Option(args, "--integration");
             if (args.Contains("--unit"))
             {
-                Storage(root); VaultAndGroups(root); Terminal(); Telnet(); Transfer(root); FileDiagnostics(root); FileTransferContract(root);
+                Storage(root); VaultAndGroups(root); Terminal(); Telnet(); await FileDiagnostics(root); await FileTransferContract(root);
             }
             else if (args.Contains("--windows"))
             {
@@ -30,13 +42,13 @@ internal static partial class Program
             }
             else if (configPath != null)
             {
-                await TelnetRoundTrip(root); Integration(root, configPath); await SshRoundTrip(root, configPath);
+                await TelnetRoundTrip(root); await Integration(root, configPath); await SshRoundTrip(root, configPath);
             }
             else
             {
                 Storage(root); Terminal(); Telnet(); await TelnetRoundTrip(root);
                 if (!args.Contains("--skip-shell")) await Shell(root);
-                Transfer(root); await Lifecycle(root);
+                await FileTransferContract(root); await Lifecycle(root);
             }
             Console.WriteLine($"{passed} checks passed");
             return 0;
@@ -65,7 +77,7 @@ internal static partial class Program
         Application.SetHighDpiMode(HighDpiMode.SystemAware);
     }
 
-    static void Ui(string root, string output)
+    static async Task Ui(string root, string output)
     {
         InitializeUi();
         using var uiStore = new Store(Path.Combine(root,"ui"));
@@ -83,13 +95,14 @@ internal static partial class Program
         var tabs = FindControl<TabControl>(form);
         var first = new TabPage("first"); var second = new TabPage("second");
         tabs.TabPages.Add(first); tabs.TabPages.Add(second); tabs.SelectedTab = second;
-        form.CloseTab(first, () => false);
+        await form.CloseTab(first, () => false);
         Check(tabs.TabPages.Contains(first) && !first.IsDisposed, "declined tab close preserves target page");
-        form.CloseTab(first, () => true);
+        await form.CloseTab(first, () => true);
         Check(first.IsDisposed && tabs.TabPages.Contains(second) && tabs.SelectedTab == second, "confirmed tab close disposes requested page and preserves other tab");
         form.Close();
         TabMouseUi();
         FileTransferUi();
+        FileTransferFormCloseUi();
     }
     static T FindControl<T>(Control parent) where T : Control
     {
@@ -193,26 +206,18 @@ internal static partial class Program
         connection.Send(Encoding.UTF8.GetBytes("exit\r")); await run.WaitAsync(TimeSpan.FromSeconds(12));
         Check(text.ToString().Contains("CONPTY_OK"), "real interactive ConPTY shell input/output/resize/exit");
     }
-    static void FileDiagnostics(string root)
+    static async Task FileDiagnostics(string root)
     {
         var backend = new MemoryRemoteFileSystem { ConnectError = new SocketException((int)SocketError.NetworkUnreachable) };
-        using IFileTransfer connection = new FileConnection(Protocol.FTP, backend);
+        await using IFileTransfer connection = new FileConnection(Protocol.FTP, backend);
         var diagnostics = new List<ConnectionDiagnostic>(); connection.Diagnostic += diagnostics.Add;
-        try { connection.Connect(); } catch (SocketException) { }
+        try { await connection.ConnectAsync(CancellationToken.None, TimeSpan.FromSeconds(1)); } catch (SocketException) { }
         Check(connection.OperationId != Guid.Empty && diagnostics.Any(d => d.State == ConnectionState.Failed) && diagnostics.Any(d => d.State == ConnectionState.Closed), "file connection diagnostics report failed and closed lifecycle");
         var failure = diagnostics.First(d => d.State == ConnectionState.Failed);
         var rendered = DiagnosticPresenter.Error(failure with { Message = "endpoint.invalid/private/password" });
         Check(!rendered.Contains("endpoint.invalid") && !rendered.Contains("password") && rendered.Contains("操作编号"), "diagnostic presenter hides endpoint details");
     }
 
-    static void Transfer(string root)
-    {
-        string dest = Path.Combine(root,"download.bin"); File.WriteAllText(dest,"original");
-        using var data = new MemoryStream(new byte[300000]); using var stop = new CancellationTokenSource();
-        bool cancelled = false; try { FileConnection.CopyAtomically(data,dest,stop.Token,n => stop.Cancel()); } catch (OperationCanceledException) { cancelled = true; }
-        Check(cancelled && File.ReadAllText(dest)=="original" && !Directory.EnumerateFiles(root,"*.part").Any(), "cancelled transfer preserves target and cleans temporary file");
-        data.Position=0; FileConnection.CopyAtomically(data,dest,CancellationToken.None,_=>{}); Check(new FileInfo(dest).Length==300000,"completed transfer replaces target");
-    }
     static async Task Lifecycle(string root)
     {
         using var connection = new TerminalConnection(new Session { Protocol = Protocol.Shell, Executable="no-such-portharbor-program.exe" },new Store(Path.Combine(root,"invalid-shell")),"",_=>false);
@@ -221,43 +226,49 @@ internal static partial class Program
         Check(failed,"invalid executable fails cleanly without leaked startup state");
         Check(connection.OperationId != Guid.Empty && diagnostics.Any(d => d.State == ConnectionState.Failed && d.ErrorCode == ConnectionErrorCode.PlatformUnavailable) && connection.State == ConnectionState.Closed, "connection diagnostics report operation, stable error and closed state");
     }
-    static void Integration(string root, string configPath)
+    static async Task Integration(string root, string configPath)
     {
         using var config=System.Text.Json.JsonDocument.Parse(File.ReadAllText(configPath)); var c=config.RootElement;
         foreach (var protocol in new[]{Protocol.FTP,Protocol.SFTP})
         {
             var s=new Session { Protocol=protocol, Host="127.0.0.1", Port=c.GetProperty(protocol.ToString().ToLowerInvariant()+"Port").GetInt32(), Username="easytest" };
             var store=new Store(Path.Combine(root,protocol.ToString()));
-            using IFileTransfer files=FileTransferFactory.Create(s,store,"easytest-only",_=>true); files.Connect();
+            await using IFileTransfer files=FileTransferFactory.Create(s,store,"easytest-only",_=>true);
+            using var timeout = new CancellationTokenSource();
+            await files.ConnectAsync(timeout.Token, TimeSpan.FromSeconds(15));
             string local=Path.Combine(root,"upload-"+protocol+".txt"),download=local+".download"; File.WriteAllText(local,"文件传输 test \0\n"+new string('x',200000));
-            if (files.Exists("/test-dir")) { foreach(var old in files.List("/test-dir")) files.Delete(old); files.Delete(new("test-dir","/test-dir",true,0,DateTime.Now)); }
-            files.Mkdir("/test-dir"); files.Upload(local,"/test-dir/中文.txt",CancellationToken.None,_=>{});
-            Check(files.List("/test-dir").Any(f=>f.Name=="中文.txt"),protocol+" lists uploaded Unicode filename");
-            Check(Throws<IOException>(() => files.Delete(new("test-dir","/test-dir",true,0,DateTime.Now))) && files.Exists("/test-dir/中文.txt"), protocol+" refuses nonempty directory deletion");
-            files.Upload(local,"/test-dir/existing.txt",CancellationToken.None,_=>{});
-            Check(Throws<IOException>(() => files.Rename("/test-dir/中文.txt","/test-dir/existing.txt")) && files.Exists("/test-dir/中文.txt"), protocol+" refuses rename over existing target");
-            files.Delete(new("existing.txt","/test-dir/existing.txt",false,0,DateTime.Now));
-            files.Download("/test-dir/中文.txt",download,CancellationToken.None,_=>{});
+            if (await files.ExistsAsync("/test-dir",timeout.Token,TimeSpan.FromSeconds(10))) { foreach(var old in await files.ListAsync("/test-dir",timeout.Token,TimeSpan.FromSeconds(10))) await files.DeleteAsync(old,timeout.Token,TimeSpan.FromSeconds(10)); await files.DeleteAsync(new("test-dir","/test-dir",true,0,DateTime.Now),timeout.Token,TimeSpan.FromSeconds(10)); }
+            await files.MkdirAsync("/test-dir",timeout.Token,TimeSpan.FromSeconds(10));
+            await files.UploadAsync(local,"/test-dir/中文.txt",timeout.Token,TimeSpan.FromSeconds(30));
+            Check((await files.ListAsync("/test-dir",timeout.Token,TimeSpan.FromSeconds(10))).Any(f=>f.Name=="中文.txt"),protocol+" lists uploaded Unicode filename");
+            Check(Throws<IOException>(() => files.DeleteAsync(new("test-dir","/test-dir",true,0,DateTime.Now),timeout.Token,TimeSpan.FromSeconds(10)).GetAwaiter().GetResult()) && await files.ExistsAsync("/test-dir/中文.txt",timeout.Token,TimeSpan.FromSeconds(10)), protocol+" refuses nonempty directory deletion");
+            await files.UploadAsync(local,"/test-dir/existing.txt",timeout.Token,TimeSpan.FromSeconds(30));
+            Check(Throws<IOException>(() => files.RenameAsync("/test-dir/中文.txt","/test-dir/existing.txt",timeout.Token,TimeSpan.FromSeconds(10)).GetAwaiter().GetResult()) && await files.ExistsAsync("/test-dir/中文.txt",timeout.Token,TimeSpan.FromSeconds(10)), protocol+" refuses rename over existing target");
+            await files.DeleteAsync(new("existing.txt","/test-dir/existing.txt",false,0,DateTime.Now),timeout.Token,TimeSpan.FromSeconds(10));
+            await files.DownloadAsync("/test-dir/中文.txt",download,timeout.Token,TimeSpan.FromSeconds(30));
             Check(File.ReadAllBytes(local).SequenceEqual(File.ReadAllBytes(download)),protocol+" upload/download bytes round trip");
             using (var stop = new CancellationTokenSource())
             {
-                Check(Throws<OperationCanceledException>(() => files.Upload(local,"/test-dir/中文.txt",stop.Token,_=>stop.Cancel()))
-                    && files.List("/test-dir").Count==1, protocol+" cancelled upload removes remote temporary file");
-                files.Download("/test-dir/中文.txt",download,CancellationToken.None,_=>{});
+                await CheckThrowsAsync<OperationCanceledException>(() => files.UploadAsync(local,"/test-dir/中文.txt",stop.Token,TimeSpan.FromSeconds(30),new CallbackProgress<TransferProgress>(_=>stop.Cancel())))
+                    .ConfigureAwait(false);
+                Check((await files.ListAsync("/test-dir",timeout.Token,TimeSpan.FromSeconds(10))).Count==1, protocol+" cancelled upload removes remote temporary file");
+                await files.DownloadAsync("/test-dir/中文.txt",download,timeout.Token,TimeSpan.FromSeconds(30));
                 Check(File.ReadAllBytes(local).SequenceEqual(File.ReadAllBytes(download)), protocol+" cancelled upload retains previous remote content");
             }
             using (var stop = new CancellationTokenSource())
             {
                 File.WriteAllText(download,"preserved local target");
-                Check(Throws<OperationCanceledException>(() => files.Download("/test-dir/中文.txt",download,stop.Token,_=>stop.Cancel()))
-                    && File.ReadAllText(download)=="preserved local target" && !Directory.EnumerateFiles(root,"*.part").Any(),
-                    protocol+" cancelled download preserves local target and removes temporary file");
+                await CheckThrowsAsync<OperationCanceledException>(() => files.DownloadAsync("/test-dir/中文.txt",download,stop.Token,TimeSpan.FromSeconds(30),new CallbackProgress<TransferProgress>(_=>stop.Cancel())))
+                    .ConfigureAwait(false);
+                Check(File.ReadAllText(download)=="preserved local target" && !Directory.EnumerateFiles(root,"*.part").Any(), protocol+" cancelled download preserves local target and removes temporary file");
             }
-            File.WriteAllText(local,"replacement"); files.Upload(local,"/test-dir/中文.txt",CancellationToken.None,_=>{});
-            files.Download("/test-dir/中文.txt",download,CancellationToken.None,_=>{}); Check(File.ReadAllText(download)=="replacement",protocol+" overwrite path");
-            files.Rename("/test-dir/中文.txt","/test-dir/renamed.txt"); var file=files.List("/test-dir").Single(); files.Delete(file); files.Delete(new("test-dir","/test-dir",true,0,DateTime.Now));
-            Check(!files.Exists("/test-dir"),protocol+" rename and delete empty directory");
+            File.WriteAllText(local,"replacement"); await files.UploadAsync(local,"/test-dir/中文.txt",timeout.Token,TimeSpan.FromSeconds(30));
+            await files.DownloadAsync("/test-dir/中文.txt",download,timeout.Token,TimeSpan.FromSeconds(30)); Check(File.ReadAllText(download)=="replacement",protocol+" overwrite path");
+            await files.RenameAsync("/test-dir/中文.txt","/test-dir/renamed.txt",timeout.Token,TimeSpan.FromSeconds(10)); var file=(await files.ListAsync("/test-dir",timeout.Token,TimeSpan.FromSeconds(10))).Single();
+            await files.DeleteAsync(file,timeout.Token,TimeSpan.FromSeconds(10)); await files.DeleteAsync(new("test-dir","/test-dir",true,0,DateTime.Now),timeout.Token,TimeSpan.FromSeconds(10));
+            Check(!await files.ExistsAsync("/test-dir",timeout.Token,TimeSpan.FromSeconds(10)),protocol+" rename and delete empty directory");
         }
     }
+
 }
 

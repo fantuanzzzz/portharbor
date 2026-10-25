@@ -282,3 +282,48 @@ Every future development session must append an entry with: date, development sc
 - 将预览构建默认改成只输出 installed/portable 开发目录。
 
 今天的开发到此结束；下一次开发前先重新运行 UI 检查，再继续功能开发。
+
+
+## 2026-10-23 - 文件传输原生异步、取消、超时与关闭等待
+
+### 本次开发内容与原因
+
+- 将公开 `IFileTransfer` 和内部 `IRemoteFileSystem` 改为原生异步契约；FTP 使用锁定版本 FluentFTP 55.1 的 `AsyncFtpClient`，SFTP 使用锁定版本 SSH.NET 2026.0 的异步连接、目录、属性、命令及文件流读写 API。`FileView` 不再用 `Task.Run` 包装同步文件操作。
+- 所有连接与文件操作均要求 `CancellationToken` 和正数操作超时。异步门闩串行化单连接操作，超时包含门闩等待，并会取消底层请求；补充连接排队超时不得误关闭其他活跃连接的检查。
+- 上传/下载改用异步流读写和释放；报告结构化传输方向、已传字节数及可选总量，并按 100ms/4MiB 节流。上传和下载继续经 `.part` 暂存，失败及取消时尽力清理并保留旧目标。
+- 文件页和主窗口增加等待关闭流程：关闭页、退出应用会取消活动文件请求，等待请求退出和传输客户端释放后再销毁窗体。没有活动任务时也会等待 FTP 异步断开完成。
+- 保持 FTP 覆盖移动。SSH.NET 2026.0 没有带取消令牌的 POSIX 覆盖重命名，因此异步 SFTP 替换改用旧目标 `.bak` 暂存、失败恢复策略，并明确替换期间路径可能短暂不存在。
+- 更新文件传输技术说明、README 和阶段任务清单；扩大内存适配器测试，覆盖预先取消、超时诊断、队列超时竞态、操作取消、流提交失败和关闭竞态。
+
+### 修改文件
+
+- `src/PortHarbor/IFileTransfer.cs`、`FileConnection.cs`、`FileView.cs`、`MainForm.cs`
+- `src/PortHarbor/RemoteFileSystems/IRemoteFileSystem.cs`
+- `src/PortHarbor/RemoteFileSystems/FtpRemoteFileSystem.cs`
+- `src/PortHarbor/RemoteFileSystems/SftpRemoteFileSystem.cs`
+- `tests/PortHarbor.Checks/Program.cs`、`FileTransferChecks.cs`
+- `README.md`、`docs/FILE-TRANSFER.md`、`docs/TECHNICAL-PLAN.md`、本开发日志
+
+### 验证结果
+
+- Release 构建：0 警告、0 错误。
+- 核心检查：93 项通过，包括异步契约、预先取消、结构化进度、稳定超时诊断、连接队列超时竞态和连接释放。
+- Windows 检查：3 项通过。
+- UI 检查：15 项通过，含文件页关闭活动请求清理，以及主窗口退出等待异步文件清理。
+- 终端 UI 冒烟输出包含 `CONPTY_OK`。
+- 本机协议回环：20 项通过，覆盖 Telnet、SSH、FTP 和 SFTP；FTP/SFTP 中文路径、上传/下载、覆盖、取消保留目标及临时文件清理、重命名冲突和目录删除均通过。
+- 报告保存在被 `.gitignore` 忽略的 `artifacts/async-transfer-unit.json` 与 `artifacts/async-transfer-validation/`；未新增运行时依赖。
+- `git diff --check` 通过；仅有 Git 对一个新写源码文件的 LF/CRLF 提示，没有行尾空白错误。
+
+### 遗留问题与边界
+
+- SSH.NET 2026.0 未提供异步客户端断开 API。SFTP 网络操作会先异步响应取消并退出门闩，然后调用库的同步 `Dispose()` 关闭客户端；相关版本及这一例外已写入文件传输说明。
+- SSH.NET 的异步重命名没有 POSIX 覆盖选项。SFTP 备份替换可能短暂暴露缺失的目标路径，服务器断线可能遗留 `.part`/`.bak`；本机 fixture 验证了常规替换，没有模拟生产服务器断线窗口。
+- FTP 上传依赖服务器最终响应确认；若服务器不返回最终数据响应，客户端会保守地报告失败。当前回环服务器正常返回确认，其他 FTP/FTPS 服务器兼容性仍待扩大。
+- 当前超时：连接 15 秒，单项文件操作 30 秒，远端临时文件尽力清理 5 秒。终端、RDP 等其他协议的全面异步和关闭生命周期仍未完成。
+- 本次未实现本地化资源、传输队列、断点续传、递归传输或自动重连。
+
+### 下一步
+
+- 补齐 SSH、Telnet、Serial、Shell 和 RDP 的诊断展示与失败分类，继续完善其他后台任务及连接关闭/应用退出生命周期覆盖。
+- 再将本地化资源、诊断消息目录和更广的 FTP/SFTP 服务器兼容性测试纳入阶段 1 清单。

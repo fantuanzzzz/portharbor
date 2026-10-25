@@ -8,65 +8,85 @@ internal sealed class SftpRemoteFileSystem(Session session, Store store, string 
     PrivateKeyFile? key;
     SftpClient Client => client ?? throw new InvalidOperationException("SFTP 尚未连接。");
 
-    public void Connect(Action<ConnectionStage> reportStage)
+    public async Task ConnectAsync(Action<ConnectionStage> reportStage, CancellationToken token)
     {
         reportStage(ConnectionStage.Authenticating);
         client = new SftpClient(TerminalConnection.SshInfo(session, password, out key));
         reportStage(ConnectionStage.HostKeyVerification);
         TerminalConnection.HostKey(client, session, store, confirm);
-        client.OperationTimeout = TimeSpan.FromSeconds(30);
-        client.Connect();
+        client.OperationTimeout = TimeSpan.FromSeconds(35);
+        token.ThrowIfCancellationRequested();
+        await client.ConnectAsync(token).ConfigureAwait(false);
     }
 
-    public List<RemoteEntry> List(string path) => Client.ListDirectory(path)
-        .Where(f => f.Name is not ("." or ".."))
-        .Select(f => new RemoteEntry(f.Name, f.FullName, f.IsDirectory, f.Length, f.LastWriteTime)).ToList();
-
-    public bool Exists(string path) => Client.Exists(path);
-    public Stream OpenRead(string path) => Client.OpenRead(path);
-    public Stream OpenWrite(string path) => Client.OpenWrite(path);
-
-    public void CommitUpload(string temporaryPath, string destination)
+    public async Task<IReadOnlyList<RemoteEntry>> ListAsync(string path, CancellationToken token)
     {
-        if (!Client.Exists(destination))
+        var entries = new List<RemoteEntry>();
+        await foreach (var f in Client.ListDirectoryAsync(path, token).WithCancellation(token).ConfigureAwait(false))
+            if (f.Name is not ("." or "..")) entries.Add(new RemoteEntry(f.Name, f.FullName, f.IsDirectory, f.Length, f.LastWriteTime));
+        return entries;
+    }
+
+    public Task<bool> ExistsAsync(string path, CancellationToken token) => Client.ExistsAsync(path, token);
+
+    public async Task<long?> GetLengthAsync(string path, CancellationToken token)
+    {
+        try { return (await Client.GetAttributesAsync(path, token).ConfigureAwait(false)).Size; }
+        catch (Renci.SshNet.Common.SftpPathNotFoundException) { return null; }
+    }
+
+    public async Task<Stream> OpenReadAsync(string path, CancellationToken token)
+        => await Client.OpenAsync(path, FileMode.Open, FileAccess.Read, token).ConfigureAwait(false);
+
+    public async Task<Stream> OpenWriteAsync(string path, CancellationToken token)
+        => await Client.OpenAsync(path, FileMode.Create, FileAccess.Write, token).ConfigureAwait(false);
+
+    public Task CompleteWriteAsync(CancellationToken token) { token.ThrowIfCancellationRequested(); return Task.CompletedTask; }
+
+    public async Task CommitUploadAsync(string temporaryPath, string destination, CancellationToken token)
+    {
+        if (!await Client.ExistsAsync(destination, token).ConfigureAwait(false))
         {
-            Client.RenameFile(temporaryPath, destination);
+            await Client.RenameFileAsync(temporaryPath, destination, token).ConfigureAwait(false);
             return;
         }
 
-        try { Client.RenameFile(temporaryPath, destination, true); }
-        catch (NotSupportedException)
+        // SSH.NET 2026 exposes cancellation-aware standard rename, while the existing
+        // overwrite extension only has a synchronous overload.
+        string backup = destination + ".portharbor-" + Guid.NewGuid().ToString("N") + ".bak";
+        await Client.RenameFileAsync(destination, backup, token).ConfigureAwait(false);
+        try { await Client.RenameFileAsync(temporaryPath, destination, token).ConfigureAwait(false); }
+        catch
         {
-            // Preserve the old destination if the server lacks POSIX overwrite support.
-            string backup = destination + ".portharbor-" + Guid.NewGuid().ToString("N") + ".bak";
-            Client.RenameFile(destination, backup);
-            try { Client.RenameFile(temporaryPath, destination); }
-            catch
+            try
             {
-                if (!Client.Exists(destination)) Client.RenameFile(backup, destination);
-                throw;
+                if (!await Client.ExistsAsync(destination, CancellationToken.None).ConfigureAwait(false))
+                    await Client.RenameFileAsync(backup, destination, CancellationToken.None).ConfigureAwait(false);
             }
-            // A failed backup cleanup must not turn a successful upload into a retry.
-            try { Client.DeleteFile(backup); } catch { }
+            catch { }
+            throw;
         }
+
+        // Cleanup must not turn a committed upload into a reported failure.
+        try { await Client.DeleteFileAsync(backup, CancellationToken.None).ConfigureAwait(false); } catch { }
     }
 
-    public void DeleteFile(string path) => Client.DeleteFile(path);
-    public void Mkdir(string path) => Client.CreateDirectory(path);
-    public void Rename(string source, string destination) => Client.RenameFile(source, destination);
+    public Task DeleteFileAsync(string path, CancellationToken token) => Client.DeleteFileAsync(path, token);
+    public Task MkdirAsync(string path, CancellationToken token) => Client.CreateDirectoryAsync(path, token);
+    public Task RenameAsync(string source, string destination, CancellationToken token) => Client.RenameFileAsync(source, destination, token);
 
-    public void Delete(RemoteEntry entry)
+    public async Task DeleteAsync(RemoteEntry entry, CancellationToken token)
     {
         // Use the same empty-directory rule for both protocols.
         if (entry.Directory)
         {
-            if (List(entry.Path).Count != 0) throw new IOException("仅允许删除空目录。");
-            Client.DeleteDirectory(entry.Path);
+            if ((await ListAsync(entry.Path, token).ConfigureAwait(false)).Count != 0) throw new IOException("仅允许删除空目录。");
+            await Client.DeleteDirectoryAsync(entry.Path, token).ConfigureAwait(false);
         }
-        else Client.DeleteFile(entry.Path);
+        else await Client.DeleteFileAsync(entry.Path, token).ConfigureAwait(false);
     }
 
-    public void Dispose()
+    public ValueTask DisposeAsync()
     {
         var current = client;
         var currentKey = key;
@@ -74,5 +94,6 @@ internal sealed class SftpRemoteFileSystem(Session session, Store store, string 
         key = null;
         try { current?.Dispose(); }
         finally { currentKey?.Dispose(); }
+        return ValueTask.CompletedTask;
     }
 }

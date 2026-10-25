@@ -2,18 +2,20 @@ namespace PortHarbor;
 
 // Vendor clients and protocol-specific overwrite semantics stay behind this boundary.
 // Streams must be disposed before another operation starts (including upload commit).
-internal interface IRemoteFileSystem : IDisposable
+internal interface IRemoteFileSystem : IAsyncDisposable
 {
-    void Connect(Action<ConnectionStage> reportStage);
-    List<RemoteEntry> List(string path);
-    bool Exists(string path);
-    Stream OpenRead(string path);
-    Stream OpenWrite(string path);
-    void CommitUpload(string temporaryPath, string destination);
-    void DeleteFile(string path);
-    void Mkdir(string path);
-    void Rename(string source, string destination);
-    void Delete(RemoteEntry entry);
+    Task ConnectAsync(Action<ConnectionStage> reportStage, CancellationToken token);
+    Task<IReadOnlyList<RemoteEntry>> ListAsync(string path, CancellationToken token);
+    Task<bool> ExistsAsync(string path, CancellationToken token);
+    Task<long?> GetLengthAsync(string path, CancellationToken token);
+    Task<Stream> OpenReadAsync(string path, CancellationToken token);
+    Task<Stream> OpenWriteAsync(string path, CancellationToken token);
+    Task CompleteWriteAsync(CancellationToken token);
+    Task CommitUploadAsync(string temporaryPath, string destination, CancellationToken token);
+    Task DeleteFileAsync(string path, CancellationToken token);
+    Task MkdirAsync(string path, CancellationToken token);
+    Task RenameAsync(string source, string destination, CancellationToken token);
+    Task DeleteAsync(RemoteEntry entry, CancellationToken token);
 }
 
 internal static class RemoteFileSystemFactory
@@ -25,4 +27,24 @@ internal static class RemoteFileSystemFactory
             Protocol.SFTP => new SftpRemoteFileSystem(session, store, password, confirm),
             _ => throw new ArgumentException("文件传输仅支持 FTP 和 SFTP。", nameof(session))
         };
+}
+
+internal static class TimeoutRunner
+{
+    public static async Task<T> RunAsync<T>(TimeSpan timeout, CancellationToken cancellationToken, Func<CancellationToken, Task<T>> action)
+    {
+        if (timeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(timeout));
+        using var timeoutSource = new CancellationTokenSource(timeout);
+        using var linkedSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutSource.Token);
+        try { return await action(linkedSource.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeoutSource.IsCancellationRequested)
+        {
+            throw new TimeoutException("The file operation exceeded its configured timeout.");
+        }
+    }
+
+    public static async Task RunAsync(TimeSpan timeout, CancellationToken cancellationToken, Func<CancellationToken, Task> action)
+    {
+        await RunAsync(timeout, cancellationToken, async token => { await action(token).ConfigureAwait(false); return true; }).ConfigureAwait(false);
+    }
 }
