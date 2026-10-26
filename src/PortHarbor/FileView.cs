@@ -13,8 +13,8 @@ public sealed class FileView : UserControl
     CancellationTokenSource? taskStop;
     TaskCompletionSource? operationFinished;
     bool busy, connected, closing;
-    public FileView(Session s, Store store, string password, Func<string, bool> confirm)
-        : this(FileTransferFactory.Create(s, store, password, confirm), s.RemotePath) { }
+    public FileView(Session s, IHostKeyTrust hostKeyTrust, string password, Func<string, bool> confirm)
+        : this(FileTransferFactory.Create(s, hostKeyTrust, password, confirm), s.RemotePath) { }
 
     // The view owns and disposes the supplied transfer instance.
     public FileView(IFileTransfer connection, string initialPath)

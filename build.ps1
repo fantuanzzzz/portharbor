@@ -1,4 +1,4 @@
-param([string]$Dotnet = 'dotnet', [string]$PackageSource = '', [switch]$IncludeRuntime, [string]$OutputDirectory = '')
+param([string]$Dotnet = 'dotnet', [string]$PackageSource = '', [switch]$IncludeRuntime, [string]$OutputDirectory = '', [switch]$SimulateFailureAfterInstall)
 $ErrorActionPreference = 'Stop'
 $env:DOTNET_CLI_HOME = Join-Path $PSScriptRoot '.build-home'
 $env:NUGET_PACKAGES = Join-Path $PSScriptRoot '.packages'
@@ -9,6 +9,7 @@ $version = '0.1.0'
 $rid = 'win-x64'
 $project = Join-Path $PSScriptRoot 'src\PortHarbor\PortHarbor.csproj'
 $checks = Join-Path $PSScriptRoot 'tests\PortHarbor.Checks\PortHarbor.Checks.csproj'
+$applicationChecks = Join-Path $PSScriptRoot 'tests\PortHarbor.Application.Checks\PortHarbor.Application.Checks.csproj'
 $artifacts = if ($OutputDirectory) { [System.IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $PSScriptRoot 'artifacts' }
 $portable = Join-Path $artifacts 'portable-win-x64'
 $framework = Join-Path $artifacts 'installed-win-x64'
@@ -31,7 +32,17 @@ $installed = [System.Collections.Generic.List[string]]::new()
 
 try {
     New-Item -ItemType Directory -Force $artifacts, $stagePortable, $stageFramework | Out-Null
-    $restoreArgs = @('restore', $checks, '--runtime', $rid, '--configfile', $config)
+    & git diff --check
+    if ($LASTEXITCODE) { throw 'Whitespace check failed' }
+    $applicationRestoreArgs = @('restore', $applicationChecks, '--configfile', $config, '--locked-mode')
+    if ($PackageSource) { $applicationRestoreArgs += @('--source', $PackageSource) }
+    & $Dotnet @applicationRestoreArgs
+    if ($LASTEXITCODE) { throw 'Application checks restore failed' }
+    & $Dotnet build $applicationChecks -c Release --no-restore
+    if ($LASTEXITCODE) { throw 'Application checks build failed' }
+    & $Dotnet run --project $applicationChecks -c Release --no-build -- --results (Join-Path $artifacts 'application-results.json')
+    if ($LASTEXITCODE) { throw 'Application checks failed' }
+    $restoreArgs = @('restore', $checks, '--runtime', $rid, '--configfile', $config, '--locked-mode')
     if ($PackageSource) { $restoreArgs += @('--source', $PackageSource) }
     & $Dotnet @restoreArgs
     if ($LASTEXITCODE) { throw 'Restore failed' }
@@ -45,6 +56,10 @@ try {
     $runtimeMode = if ($IncludeRuntime) { 'true' } else { 'false' }
     & $Dotnet publish $project -c Release --no-restore -r $rid --self-contained $runtimeMode -o $stageFramework
     if ($LASTEXITCODE) { throw 'Publish failed' }
+    $smokeData = Join-Path $staging 'smoke-data'
+    New-Item -ItemType Directory -Force $smokeData | Out-Null
+    & (Join-Path $stageFramework 'PortHarbor.exe') '--smoke' '--installed' '--data-dir' $smokeData
+    if ($LASTEXITCODE) { throw 'Published application smoke failed' }
     Copy-Item -Path (Join-Path $stageFramework '*') -Destination $stagePortable -Recurse -Force
     Set-Content -LiteralPath (Join-Path $stagePortable 'PortHarbor.portable') -Value 'Portable configuration: PortHarbor.ini beside the executable.' -Encoding UTF8
 
@@ -68,6 +83,7 @@ try {
         Move-Item -LiteralPath $output.Staged -Destination $output.Target
         $installed.Add($output.Target)
     }
+    if ($SimulateFailureAfterInstall) { throw 'Simulated failure after publish replacement.' }
     Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
     Write-Host "Portable: $portableZip"
     Write-Host "Installed layout (installer pending): $frameworkZip"

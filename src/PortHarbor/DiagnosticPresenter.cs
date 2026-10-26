@@ -4,10 +4,20 @@ public static class DiagnosticPresenter
 {
     public static string Status(ConnectionDiagnostic diagnostic)
     {
+        if (diagnostic.ErrorCode == ConnectionErrorCode.None)
+        {
+            if (diagnostic.State == ConnectionState.Closed) return "已关闭";
+            if (diagnostic.State == ConnectionState.Connected)
+                return diagnostic.Protocol == Protocol.RDP ? "已启动 Windows 远程桌面客户端" : "已连接";
+        }
         var stage = diagnostic.Stage switch
         {
+            ConnectionStage.Validation => "正在检查配置",
+            ConnectionStage.Connecting => "正在连接",
             ConnectionStage.Authenticating => "正在验证身份",
             ConnectionStage.HostKeyVerification => "正在验证主机密钥",
+            ConnectionStage.OpeningChannel => "正在打开通道",
+            ConnectionStage.LaunchingClient => "正在启动远程桌面客户端",
             ConnectionStage.Reading => "正在读取",
             ConnectionStage.Writing => "正在写入",
             ConnectionStage.Closing => "正在关闭",
@@ -33,7 +43,7 @@ public static class DiagnosticPresenter
         ConnectionErrorCode.AuthenticationFailed => "身份验证失败",
         ConnectionErrorCode.HostKeyRejected => "主机密钥未接受",
         ConnectionErrorCode.NetworkUnavailable => "网络不可用",
-        ConnectionErrorCode.Timeout => "连接超时",
+        ConnectionErrorCode.Timeout => "操作超时",
         ConnectionErrorCode.PermissionDenied => "权限不足",
         ConnectionErrorCode.PlatformUnavailable => "平台资源不可用",
         ConnectionErrorCode.ProtocolError => "协议操作失败",

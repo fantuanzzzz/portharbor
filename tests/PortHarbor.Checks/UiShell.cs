@@ -11,7 +11,7 @@ internal static class UiShell
         using var form=new Form { Width=1000,Height=650 };
         var terminal=new TerminalView { Dock=DockStyle.Fill }; form.Controls.Add(terminal);
         var session=new Session { Protocol=Protocol.Shell,Executable="cmd.exe",Arguments="/Q",WorkingDirectory=root };
-        using var connection=new TerminalConnection(session,new Store(Path.Combine(root,"ui-shell")),"",_=>false);
+        using var connection=TerminalConnectionFactory.Create(session,new Store(new WindowsSecretProtector(), new WindowsAppDataPaths(Path.Combine(root,"ui-shell"))),"",_=>false);
         var output=new StringBuilder();
         connection.Output+=text=> { lock(output) output.Append(text); terminal.Append(text); };
         terminal.Input+=connection.Send;

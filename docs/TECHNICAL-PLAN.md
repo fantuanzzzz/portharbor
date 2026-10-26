@@ -1,6 +1,6 @@
 ﻿# PortHarbor 技术方案
 
-版本：0.1.0 基线  
+版本：0.1.0 基线
 状态：实施中（各阶段进度见第 8 节）
 范围：工程结构、诊断能力、扩展方式、平台与架构迁移
 
@@ -8,9 +8,11 @@
 
 | 文档 | 维护内容 | 更新时机 |
 | --- | --- | --- |
+| [文档入口](README.md) | GitHub 阅读顺序、当前快照、ADR 索引和上传前检查 | 文档结构或上传注意事项变化时 |
 | 本文档 | 总体架构、路线图、阶段状态及验收条件；第 8 节是当前进度的统一入口 | 任务或阶段完成、计划调整时 |
 | [开发日志](DEVELOPMENT-LOG.md) | 每次开发的范围、修改文件、验证结果、遗留问题和当时的下一步 | 每次开发结束时追加，保留历史记录 |
 | [文件传输约定](FILE-TRANSFER.md) | 文件传输模块当前的接口、资源所有权、取消和覆盖语义及扩展规则 | 模块契约或实现边界变化时 |
+| [终端会话约定](TERMINAL-SESSIONS.md) | 终端端口、启动/关闭所有权、输入顺序及适配器中止语义 | 终端契约或生命周期变化时 |
 
 [README](../README.md) 负责功能介绍、运行、构建与验证命令。模块文档链接到本方案查看进度，不另行维护路线图；开发日志中的“下一步”是当时的记录，当前安排以本文档为准。历史验证结果不代表本次重新执行过检查。
 
@@ -30,17 +32,17 @@ PortHarbor 当前是 Windows 桌面连接工作台，提供 SSH、Telnet、RDP�
 
 | 领域 | 当前情况 | 对规划的影响 |
 | --- | --- | --- |
-| 桌面 UI | 单个 `net8.0-windows` WinForms 项目；`MainForm` 创建连接视图、连接对象并负责导航 | 保留 WinForms 作为当前壳；将连接生命周期和用例编排移出窗体 |
-| 会话与存储 | `Session`、`AppData`、JSON 序列化、校验、备份、导入导出都在 `Models.cs`；新配置为 schema v2，兼容读取 v1；独立分类列表保留空分类 | 保持 v1/v2 迁移兼容，再调整存储实现 |
-| 终端会话 | `TerminalConnection` 同时处理 SSH、Telnet、串口、Shell、I/O 队列、取消和资源释放 | 按协议拆成连接适配器，统一终端会话接口和错误模型 |
-| 文件传输 | `FileView` 依赖 `IFileTransfer`；`FileConnection` 管理共享传输策略，FTP/SFTP 经 `IRemoteFileSystem` 独立适配 | 当前契约见 [文件传输约定](FILE-TRANSFER.md)，实施进度见第 8 节 |
-| 终端显示 | `TerminalScreen` 解析终端状态，`TerminalView` 绘制 WinForms 控件 | 把解析器保持为可独立测试的组件；渲染层通过屏幕状态/事件消费它 |
-| Windows 边界 | `SecretProtection` 调用 DPAPI；主密码对 DPAPI 密文再加密；`ConPty` 调用 Win32；RDP 通过 `mstsc.exe` 启动 | 明确 `ISecretProtector`、`ILocalShell`、`IRemoteDesktopLauncher` 平台服务；凭据迁移需保留主密码策略 |
+| 桌面 UI | `PortHarbor` 是 `net8.0-windows` WinForms 组合根；`MainForm` 负责导航、视图和平台服务装配 | 保留 WinForms 作为当前壳；连接生命周期、存储和平台调用通过 Application/平台端口进入 |
+| 会话与存储 | Domain 保存会话/协议模型；Application 提供会话与配置用例；Infrastructure 负责 JSON/INI、schema v1/v2、备份、迁移和主机信任 | 保持 v1/v2 与安装/便携配置兼容，继续抽取导入导出业务策略 |
+| 终端会话 | Application 的 `TerminalConnection` 管理统一终端生命周期、I/O 队列、取消和资源释放；SSH/Telnet 在 Infrastructure，Shell/Serial/ConPTY 在 Windows 平台 | 继续完善剩余协议实机验证和平台边界 |
+| 文件传输 | Application 的 `FileConnection` 管理取消、超时、临时文件和覆盖策略；FTP/SFTP 由 Infrastructure 适配 | 当前契约见 [文件传输约定](FILE-TRANSFER.md)，实现保持异步操作和失败清理 |
+| 终端显示 | Domain 的 `TerminalScreen` 保存解析状态，WinForms `TerminalView` 负责绘制 | 保持解析器无 UI 依赖，后续再评估成熟终端引擎 |
+| Windows 边界 | `WindowsSecretProtector`、`WindowsRemoteDesktopLauncher`、`WindowsPlatformCapabilities`、`WindowsAppDataPaths` 和 ConPTY 位于 Windows 平台项目 | 保留 DPAPI/便携密码库、mstsc、路径迁移和能力检测兼容；文件选择器仍待迁移 |
 | 依赖与构建 | SSH.NET、FluentFTP、System.IO.Ports；锁定 NuGet 依赖；默认生成不含 .NET 环境的框架依赖 x64 ZIP，`-IncludeRuntime` 可选生成自包含包 | 保留锁文件；CI 与本地脚本调用同一组可复现命令；发布目录使用暂存后提交 |
-| 测试 | `PortHarbor.Checks` 是自定义检查程序；协议集成测试使用本机 Python FTP/SSH 服务；有 WinForms/ConPTY 检查 | 将快速单元测试、Windows 系统集成测试和协议端到端测试分层 |
+| 测试 | Application 检查、核心 Windows 检查、WinForms/ConPTY 检查和本机 Python 协议回环均由 `PortHarbor.Checks` 分层入口执行 | 继续保持快速检查、Windows 系统检查、协议端到端和发布冒烟分层 |
 | 工程自动化 | 已有 Windows CI 工作流和分层检查入口；应用仍是单个 WinForms 项目 | 继续补齐工程基线验收，逐步抽取项目边界 |
 
-基线证据来自 [README](../README.md)、[VERIFICATION](../VERIFICATION.md)、[PortHarbor.csproj](../src/PortHarbor/PortHarbor.csproj)、[build.ps1](../build.ps1)、`Models.cs`、`MainForm.cs`、`TerminalConnection.cs`、`FileConnection.cs`、`TerminalScreen.cs`、`TerminalView.cs`、`ConPty.cs` 和 `SecretProtection.cs`。这些文件和当前实现是规划依据；方案不假设尚未实现的模块已经存在。
+当前依据来自 [README](../README.md)、[开发日志](DEVELOPMENT-LOG.md)、[PortHarbor.csproj](../src/PortHarbor/PortHarbor.csproj)、[build.ps1](../build.ps1)、Domain/Application/Infrastructure/Platform.Windows 项目及 `MainForm.cs`。早期单体文件名只保留在历史日志中，不作为当前源码路径；方案中的完成状态以当前工作区和验证报告为准。
 
 ### UI 与双版本配置增量（2026-10-23）
 
@@ -53,7 +55,7 @@ PortHarbor 当前是 Windows 桌面连接工作台，提供 SSH、Telnet、RDP�
 
 本增量完成日期：2026-10-23；提交：当前工作区，待提交。
 
-终端交互增量：主密码命名、跳过解锁、滚动条、可选左键复制、可选右键粘贴、字体和配色菜单已实现；设置持久化与 SSH 交互式认证仍未完成。正式安装程序不计为已完成。实现依据见 `IniConfiguration.cs`、`Models.cs`、`TerminalView.cs`、`SessionTreeIcons.cs`、`MainForm.cs` 和 `build.ps1`。基线表中此前仅 JSON、DPAPI 和单一框架包的描述以本增量为准；阶段 0–4 的整体状态仍按各自验收条件判断。
+终端交互增量：主密码命名、跳过解锁、滚动条、可选左键复制、可选右键粘贴、字体和配色菜单已实现；设置持久化与 SSH 交互式认证仍未完成。正式安装程序不计为已完成。本增量的当前实现分布在 `src/PortHarbor/MainForm.cs`、`SessionEditor.cs`、Domain/Application/Infrastructure 和 Windows 平台项目中；历史单体文件名只保留在开发日志中。基线表中此前仅 JSON、DPAPI 和单一框架包的描述以本增量为准；阶段 0–4 的整体状态仍按各自验收条件判断。
 
 ## 3. 目标依赖结构
 
@@ -105,7 +107,7 @@ tests/
 - `IFileTransferClient`：列目录、上传、下载、创建目录、重命名和删除；进度和取消使用标准回调/令牌。
 - `IRemoteDesktopLauncher`：接受经校验的 RDP 选项并返回启动结果；不把 RDP 窗口生命周期伪装成嵌入式会话。
 - `ISerialPortProvider`、`ILocalShellLauncher`：暴露平台能力、设备列表和启动/错误信息。
-- `IHostKeyTrustStore`：执行 SSH 首次信任、已知密钥匹配和变更拒绝。确认 UI 由 Application 请求，UI 决定如何呈现。
+- `IHostKeyTrust`：执行 SSH 首次信任、已知密钥匹配和变更拒绝。确认回调由 UI 注入，存储适配器只保存用户确认的指纹。
 
 接口只表达本产品需要的能力。SSH 和 SFTP 可以共享主机身份验证实现，但不必共享不同的终端/文件操作模型。每个网络 I/O 都应接受取消令牌和连接/操作超时；对不支持可中断取消的第三方 API，适配器必须说明行为并通过关闭底层资源解除阻塞。
 
@@ -175,14 +177,14 @@ tests/
 
 ## 8. 分阶段实施
 
-进度核对日期：2026-10-23。依据当前源码、构建脚本、CI 工作流及本次异步传输检查报告。
+进度核对日期：2026-10-26。依据当前源码、构建脚本、CI 工作流及开发日志中的验证记录。
 
 | 阶段 | 状态 | 当前结论 |
 | --- | --- | --- |
-| 0：工程基线 | 进行中 | 已有检查分层、CI 和 staging 发布，仍有格式检查、发布冒烟等待补齐 |
+| 0：工程基线 | 进行中 | 已有检查分层、CI、锁定恢复、差异空白检查及发布冒烟/回滚验证，干净 checkout 与耗时基线仍待验收 |
 | 1：诊断与稳健性 | 进行中 | 文件传输已异步化并有取消/超时/关闭测试；其余协议诊断和后台生命周期仍待完善 |
-| 2：稳定内核 | 未开始 | 尚未建立独立 Domain/Application 项目 |
-| 3：协议与平台隔离 | 部分提前完成 | FTP/SFTP 异步适配器已拆分，其余隔离和项目迁移待实施 |
+| 2：稳定内核 | 进行中 | Domain/Application 承载会话、配置、文件传输和终端编排；存储及网络适配器在 Infrastructure，导入导出业务策略及其余纯逻辑待完善 |
+| 3：协议与平台隔离 | 部分提前完成 | 文件传输、SSH/Telnet 已分层；Windows 平台实现、能力报告和应用数据路径已接入，文件选择器待实施 |
 | 4：新平台或 UI | 未开始（按需求启动） | 尚未选择目标平台与能力范围 |
 
 维护规则：`[x]` 仅表示该子任务已完成，`[ ]` 表示未完成或尚未验证。部分完成的任务应拆成可独立核验的子项。每次开发结束同步更新清单并追加开发日志；只有全部任务及完成条件均有验证依据，才将阶段标为“已完成”，填写完成日期、对应提交和开发日志链接。阶段可以交叉实施，提前完成某个子项不代表整个阶段完成。
@@ -194,14 +196,14 @@ tests/
 - [x] 将验证拆为核心、Windows、协议集成和 UI/ConPTY 入口，提供 JSON 结果报告。
 - [x] 加入 Windows CI，执行恢复、Release 构建及上述检查，上传结果报告。
 - [x] 使用 NuGet 依赖锁文件。
-- [ ] 加入自动格式检查及强制锁定模式恢复验证。
-- [ ] 将发行包启动冒烟纳入发布流程，并验证干净 checkout 和发布失败保留旧产物的场景。
+- [x] 加入自动差异空白检查及强制锁定模式恢复验证。
+- [x] 将发行包启动冒烟纳入发布流程；通过 `tests/build-rollback.ps1` 验证失败后保留旧产物，干净 checkout 仍待验收。
 - [ ] 建立构建、测试耗时和覆盖范围基线。
 - [x] 发布脚本使用 staging，成功后替换产物，失败时尝试回滚。
 - [x] 增加总体技术方案。
 - [ ] 增加 ADR 模板。
 
-依据：[`windows-ci.yml`](../.github/workflows/windows-ci.yml)、[`build.ps1`](../build.ps1)、[`packages.lock.json`](../src/PortHarbor/packages.lock.json)；历史构建与检查结果见[开发日志](DEVELOPMENT-LOG.md)。工作流文件存在不等于已核实远端 CI 成功运行；发布脚本具有回滚逻辑不等于已完成故障注入验收。
+依据：[`windows-ci.yml`](../.github/workflows/windows-ci.yml)、[`build.ps1`](../build.ps1)、[`build-rollback.ps1`](../tests/build-rollback.ps1)、[`packages.lock.json`](../src/PortHarbor/packages.lock.json)；历史构建与检查结果见[开发日志](DEVELOPMENT-LOG.md)。干净 checkout 仍需在独立环境复核。
 
 **完成条件：**干净 checkout 可按文档复现 build/test；PR 有自动结果；失败时能看到稳定测试名和机器可读报告；发布失败不删除旧 ZIP。
 
@@ -211,28 +213,37 @@ tests/
 
 - [x] 建立稳定错误码、连接阶段、状态、可重试性和 `operationId`，接入终端及文件连接诊断。
 - [x] 增加安全诊断展示器，文件视图显示阶段及错误类别。
-- [ ] 统一终端及 RDP 等其余界面的诊断展示，核验所有协议失败路径。
+- [x] 统一终端及 RDP 的诊断展示，核验 SSH、Telnet、FTP、SFTP、Shell 和 RDP 的失败路径；串口实体设备及 FTPS 仍待实机验证。
 - [x] 将文件传输契约及 FTP/SFTP 适配器改为原生异步，统一取消、超时和结构化进度，移除文件视图的同步调用包装。
 - [ ] 完善其他同步网络路径的异步、取消及超时处理。
 - [x] 文件视图关闭标签及应用退出时取消并等待活动文件操作和传输连接释放。
-- [ ] 为其余 UI 事件、后台任务、Dispose/关闭和错误呈现建立统一服务边界；清理空 `catch` 或记录非敏感上下文。
+- [x] 终端通过统一会话端口提供可等待关闭，标签和应用退出等待启动、输入任务及资源清理。
+- [ ] 为其余 UI 事件和后台任务完善统一服务边界；清理空 `catch` 或记录非敏感上下文。
 - [x] 增加连接失败/关闭诊断、安全展示脱敏、文件传输取消清理与目标冲突检查。
-- [ ] 补齐断网、认证失败、无效主机、阻塞取消、连接关闭竞态及进程退出等覆盖。
+- [x] 增加终端启动中取消、晚启动返回、阻塞写入关闭竞态，以及真实 SSH 握手/Telnet 读取阻塞取消检查。
+- [ ] 补齐其他断网、无效主机、串口阻塞及进程退出等覆盖。
 
-依据：[`Diagnostics.cs`](../src/PortHarbor/Diagnostics.cs)、[`DiagnosticPresenter.cs`](../src/PortHarbor/DiagnosticPresenter.cs)、终端和文件连接实现及[开发日志](DEVELOPMENT-LOG.md)。本次异步传输验证报告位于 ignored `artifacts/async-transfer-validation`；其余未勾选任务仍需单独验收。
+依据：[`DiagnosticClassifier.cs`](../src/PortHarbor.Infrastructure/DiagnosticClassifier.cs)、[`DiagnosticPresenter.cs`](../src/PortHarbor/DiagnosticPresenter.cs)、[`ConnectionStatusLabel.cs`](../src/PortHarbor/ConnectionStatusLabel.cs)、终端/RDP/文件连接实现及[开发日志](DEVELOPMENT-LOG.md)。诊断增量报告位于 ignored `artifacts/diagnostics-validation`，本轮分层回归位于 `artifacts/file-transfer-layering`；其余未勾选任务仍需单独验收。
 
 **完成条件：**每个连接失败都能定位操作阶段和错误类别；关闭页面能及时解除后台 I/O；没有凭据或终端文本进入日志。
 
 ### 阶段 2：从单体中抽出稳定内核
 
-状态：未开始；完成日期：待验收；完成提交：待验收。
+状态：进行中；完成日期：待验收；完成提交：待验收。
 
-- [ ] 新建 Domain 项目，迁入 `Session`/协议配置校验、Telnet codec、终端状态模型及不依赖 WinForms 的纯逻辑。
-- [ ] 新建 Application 项目，迁入会话管理、连接编排、导入导出和文件传输用例；定义前述端口。
-- [ ] 把现有 `Store` 拆成配置仓储与凭据/主机信任端口实现；保持 JSON v1/v2 读取及显式迁移行为兼容。
-- [ ] 为所有数据格式建立 v1/v2 fixture 和迁移测试；先保持当前界面和用户数据目录不变。
+- [x] 新建 Domain 项目，迁入 `Session`/协议配置校验、协议枚举、连接诊断契约和 Telnet codec；Domain 独立目标为 `net8.0`，不引用 WinForms 或协议厂商库。
+- [x] 将文件传输数据记录、进度契约和 `IFileTransfer`/`IRemoteFileSystem` 端口迁入 Domain；FTP/SFTP 工厂及实现仍留在基础设施侧。
+- [x] 将终端屏幕状态模型 `TerminalScreen` 和 `Cell` 迁入 Domain，保留基础颜色值类型，不依赖 WinForms 或 GDI 渲染。
+- [ ] 梳理并迁移其余不依赖平台的纯逻辑。
+- [x] 新建 Application 项目，迁入会话创建、编辑、删除和读取用例；定义 `ISessionRepository`，不引用 WinForms 或厂商库。
+- [x] 定义配置仓储、密码库、主机信任端口及 `ConfigurationService`；界面、SSH 终端和 SFTP 适配器通过端口使用。
+- [x] 将 `Store` 的 JSON/INI 格式读写、密码库及主机信任持久化拆入 `PortHarbor.Infrastructure`；适配器共享配置状态、写入锁及原子替换，项目目标 `net8.0-windows` 且不引用 WinForms。
+- [x] 将 `FileConnection` 和共享超时策略迁入 Application，通过 `IRemoteFileSystem` 及错误分类回调隔离协议厂商；独立 `net8.0` 检查覆盖取消、临时文件、提交、超时及关闭竞态。
+- [x] 定义 `ITerminalSession`/`ITerminalTransport`，将终端校验、连接生命周期、输入队列、UTF-8 解码、取消与关闭编排迁入 Application。
+- [ ] 将导入导出业务策略继续迁入 Application，格式读写保留在适配器。
+- [x] 为会话 JSON v1/v2 和便携 INI 建立 fixture、迁移、凭据关联及失败回滚检查；先保持当前界面和用户数据目录不变。
 
-验收依据：待实施后记录独立项目构建、依赖检查与配置兼容性验证。
+验收依据：独立 Application 检查 92 项、核心检查 217 项、Windows 检查 14 项及 UI 检查 45 项通过，包含平台边界、终端/文件取消与关闭竞态、JSON/INI 导入失败、主机信任写入失败回滚、能力缺失/恢复和路径迁移边界。Release 构建与报告见[开发日志](DEVELOPMENT-LOG.md)；DPAPI 已移入平台项目，文件选择器及 Infrastructure 的 Windows 目标仍待后续隔离，整个阶段尚未完成。
 
 **完成条件：**Domain/Application 可单独构建和测试；应用项目不需要引用 WinForms；旧配置在重构前后读取结果一致。
 
@@ -240,13 +251,18 @@ tests/
 
 状态：部分提前完成；完成日期：待验收；完成提交：待验收。
 
-- [ ] 将终端协议拆为 SSH、Telnet、串口和本地 Shell 适配器，共用终端会话契约。
+- [x] 将 SSH/Telnet 终端拆为 Infrastructure 适配器，共用 Application 终端端口，移除 UI 对 SSH.NET 的直接包引用。
+- [x] 建立 `PortHarbor.Platform.Windows`，分别迁入串口、本地 Shell 与 ConPTY 实现；共享流生命周期基类归入 Application，平台项目不引用 UI 或网络 Infrastructure。
+- [x] 增加 `ISerialPortProvider`，通过平台实现提供串口设备与参数选项；UI 移除 System.IO.Ports 直接包引用及类型使用，保持旧配置字符串兼容。
 - [x] 建立异步 `IFileTransfer`/`IRemoteFileSystem` 边界，拆分 FTP/SFTP 适配器；公共层管理超时、取消、临时文件和结构化进度，UI 保留覆盖确认。
-- [ ] 将文件传输用例及适配器迁入独立应用层/基础设施项目，保持阶段 1 的异步契约与验证结果。
-- [ ] 将 DPAPI、ConPTY、mstsc、Windows 路径/文件选择器移入 Windows 平台项目。
-- [ ] 在 UI 组合根注册实现；通过 `IPlatformCapabilities` 呈现不可用能力。
+- [x] 将文件传输用例及 FTP/SFTP 适配器迁入独立 Application/Infrastructure 项目；共享 SSH 配置与厂商错误分类位于 Infrastructure，维持异步契约和既有回归结果。
+- [x] 定义 `ISecretProtector`，将 DPAPI 移入 Windows 平台项目并注入存储；保留安装版、便携版及旧凭据迁移格式，平台失败不得降级保护。
+- [x] 定义 `IRemoteDesktopLauncher`，将 RDP 校验/配置/诊断迁入 Application，mstsc 与临时文件生命周期移入 Windows 平台项目。
+- [x] 定义 `IAppDataPaths`，将安装/便携路径、旧 EasyConnect 迁移源和 RDP 临时目录解析移入 Windows 平台项目；存储适配器消费解析结果并拒绝配置文件越界路径。
+- [ ] 将 Windows 路径/文件选择器继续移入 Windows 平台项目。
+- [x] 在 UI 组合根注册 `IPlatformCapabilities` Windows 实现，编辑器禁用不可用连接但允许保存，连接入口在创建资源前显示原因并支持重新检查；帮助菜单展示包括 DPAPI 在内的能力概览。
 
-依据：[`IFileTransfer.cs`](../src/PortHarbor/IFileTransfer.cs)、[`RemoteFileSystems`](../src/PortHarbor/RemoteFileSystems)、[文件传输约定](FILE-TRANSFER.md)及开发日志中“文件传输接口与 FTP/SFTP 适配器拆分”记录。拆分仍在现有 WinForms 项目内，尚未达到整个阶段的分层完成条件。
+依据：[`FileTransferContracts.cs`](../src/PortHarbor.Domain/FileTransferContracts.cs)、[`TerminalContracts.cs`](../src/PortHarbor.Application/TerminalContracts.cs)、[`平台服务端口`](../src/PortHarbor.Application/PlatformContracts.cs)、[`路径端口`](../src/PortHarbor.Application/AppDataPaths.cs)、[`能力端口与连接策略`](../src/PortHarbor.Application/PlatformCapabilities.cs)、[`Windows 平台项目`](../src/PortHarbor.Platform.Windows/PortHarbor.Platform.Windows.csproj)、[文件传输约定](FILE-TRANSFER.md)、[终端会话约定](TERMINAL-SESSIONS.md)、[凭据与 RDP 决策](adr/0003-secret-protection-and-rdp.md)、[平台能力决策](adr/0004-platform-capabilities.md)、[路径决策](adr/0005-application-data-paths.md)及开发日志。协议回环 26 项通过，DPAPI 迁移、RDP 清理、能力缺失/恢复、路径解析/迁移与界面接入已覆盖；文件选择器、真实 RDP 登录及串口仍需后续验收。
 
 **完成条件：**领域/用例项目没有 Win32 API 和协议厂商类型；各适配器单独可测；Windows 当前功能保持现有验收结果。
 
@@ -306,10 +322,10 @@ tests/
 
 以下安排对应第 8 节任务清单，不代表新增验收项：
 
-1. 文件传输异步契约和 FTP/SFTP 底层异步 API 已实现；下一步补齐其余协议诊断展示、失败分类与后台生命周期覆盖。
+1. 下一步将 Windows 文件打开/保存对话框边界迁入平台项目，并保留现有导入/导出文件名、过滤器与无密码数据策略。
 2. 本地化资源、诊断消息目录和更多服务器兼容性测试实施前补入阶段 1 清单。
-3. 补齐阶段 0 尚未验收的工程项，具体缺口见第 8 节。
-4. 按阶段 2、3 抽取稳定内核、其余协议和平台实现，保持 Windows 行为及用户数据兼容。
+3. 完成阶段 0 尚未验收的故障注入、干净 checkout 和耗时/覆盖基线，具体缺口见第 8 节。
+4. 继续按阶段 2、3 完善导入导出业务策略与应用端口，保持 Windows 行为及用户数据兼容。
 5. 阶段 4 仅在目标用户、交付平台和能力清单明确后启动。
 
 这一路径先降低当前开发和故障处理成本，同时使平台迁移成为替换明确组件的工作，而不是重写整个产品。

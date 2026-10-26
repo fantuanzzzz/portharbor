@@ -22,8 +22,16 @@ jobs:
           python-version: 3.12
       - name: Install loopback fixture dependencies
         run: python -m pip install -r tests/requirements.txt
+      - name: Restore application checks
+        run: dotnet restore tests/PortHarbor.Application.Checks/PortHarbor.Application.Checks.csproj --configfile NuGet.Config --locked-mode
+      - name: Build application checks
+        run: dotnet build tests/PortHarbor.Application.Checks/PortHarbor.Application.Checks.csproj -c Release --no-restore
+      - name: Platform independent application checks
+        run: dotnet run --project tests/PortHarbor.Application.Checks -c Release --no-build -- --results artifacts/application-results.json
       - name: Restore locked dependencies
-        run: dotnet restore tests/PortHarbor.Checks/PortHarbor.Checks.csproj --runtime win-x64 --configfile NuGet.Config
+        run: dotnet restore tests/PortHarbor.Checks/PortHarbor.Checks.csproj --runtime win-x64 --configfile NuGet.Config --locked-mode
+      - name: Check diff whitespace
+        run: git diff --check
       - name: Build Release
         run: dotnet build tests/PortHarbor.Checks/PortHarbor.Checks.csproj -c Release --no-restore
       - name: Fast core checks

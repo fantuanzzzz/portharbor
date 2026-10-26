@@ -14,8 +14,9 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="SSH.NET" Version="2026.0.0" />
-    <PackageReference Include="FluentFTP" Version="55.1.0" />
-    <PackageReference Include="System.IO.Ports" Version="8.0.0" />
+    <ProjectReference Include="../PortHarbor.Infrastructure/PortHarbor.Infrastructure.csproj" />
+    <ProjectReference Include="../PortHarbor.Application/PortHarbor.Application.csproj" />
+    <ProjectReference Include="../PortHarbor.Domain/PortHarbor.Domain.csproj" />
+    <ProjectReference Include="../PortHarbor.Platform.Windows/PortHarbor.Platform.Windows.csproj" />
   </ItemGroup>
 </Project>

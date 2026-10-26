@@ -5,15 +5,28 @@ namespace PortHarbor;
 public sealed class MainForm : Form
 {
     readonly Store store;
+    readonly ConfigurationService configuration;
+    readonly RdpLauncher remoteDesktop;
+    readonly IPlatformCapabilities capabilities;
+    readonly PlatformConnectionPolicy platform;
+    readonly Func<Session, string, Func<string, bool>, ITerminalSession> createTerminal;
     readonly TreeView tree = new() { Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, HideSelection = false, FullRowSelect = true, ItemHeight = 32, ShowLines = false, ShowRootLines = false, BackColor = Color.FromArgb(242, 245, 250) };
     readonly TextBox search = new() { Dock = DockStyle.Top, PlaceholderText = "搜索会话、主机或协议…", Margin = new Padding(8) };
     readonly ConnectionTabs tabs = new();
     readonly Dictionary<TabPage, IDisposable> connections = [];
     readonly ToolStripStatusLabel status = new() { Text = "就绪", Spring = true, TextAlign = ContentAlignment.MiddleLeft };
     bool shutdownPending, closeReady;
-    public MainForm(Store store)
+    public MainForm(Store store) : this(store, new ConfigurationService(store, store, store)) { }
+    internal MainForm(Store store, ConfigurationService configuration,
+        Func<Session, string, Func<string, bool>, ITerminalSession>? createTerminal = null,
+        IRemoteDesktopLauncher? remoteDesktopLauncher = null, IPlatformCapabilities? capabilities = null)
     {
         this.store = store;
+        this.configuration = configuration;
+        this.capabilities = capabilities ?? new WindowsPlatformCapabilities();
+        platform = new PlatformConnectionPolicy(this.capabilities);
+        remoteDesktop = new RdpLauncher(remoteDesktopLauncher ?? new WindowsRemoteDesktopLauncher(), store.Paths);
+        this.createTerminal = createTerminal ?? ((session, password, confirm) => TerminalConnectionFactory.Create(session, configuration, password, confirm));
         Text = "PortHarbor · 轻量连接工作台"; Size = new Size(1250, 820); MinimumSize = new Size(850, 560);
         StartPosition = FormStartPosition.CenterScreen; Font = new Font("Microsoft YaHei UI", 9); AutoScaleMode = AutoScaleMode.Dpi; BackColor = Color.White;
         var toolbar = new MenuStrip { BackColor = Color.White, Padding = new Padding(8, 5, 8, 5) };
@@ -29,8 +42,12 @@ public sealed class MainForm : Form
         Item(sessionsMenu, "连接", ConnectSelected); Item(sessionsMenu, "编辑…", () => { if (Selected is { } session) Edit(session); }); Item(sessionsMenu, "删除会话及其密码…", Delete);
         var window = Menu("窗口"); Item(window, "关闭当前标签…", CloseTab);
         var settings = Menu("设置"); Item(settings, "主密码…", ConfigureMasterPassword);
-        Item(settings, "打开配置目录", () => Process.Start(new ProcessStartInfo("explorer.exe", store.DirectoryPath) { UseShellExecute = true }));
-        var help = Menu("帮助"); Item(help, "关于 PortHarbor", () => MessageBox.Show(this, "PortHarbor 0.1.0 私有预览版\nSSH · Telnet · RDP · FTP · SFTP · Serial · Shell\n功能限制和第三方许可见发行包 README。", "关于 PortHarbor"));
+        Item(settings, "打开配置目录", () => Process.Start(new ProcessStartInfo("explorer.exe", store.Paths.ConfigurationDirectory) { UseShellExecute = true }));
+        var help = Menu("帮助");
+        Item(help, "平台能力", () => MessageBox.Show(this,
+            string.Join("\n\n", Enum.GetValues<PlatformCapability>().Select(c => PlatformCapabilityPresenter.Describe(c, this.capabilities.Get(c))))
+                + "\n\n运行支持可用不代表设备可访问或远程登录成功。", "平台能力", MessageBoxButtons.OK, MessageBoxIcon.Information));
+        Item(help, "关于 PortHarbor", () => MessageBox.Show(this, "PortHarbor 0.1.0 私有预览版\nSSH · Telnet · RDP · FTP · SFTP · Serial · Shell\n功能限制和第三方许可见发行包 README。", "关于 PortHarbor"));
         tree.ImageList = SessionTreeIcons.Create(); tree.ShowPlusMinus = true; tree.ShowLines = true; tree.ShowRootLines = true; tree.ShowNodeToolTips = true;
         var split = new SplitContainer { Dock = DockStyle.Fill, FixedPanel = FixedPanel.Panel1, SplitterWidth = 1, BackColor = Color.FromArgb(220, 226, 235), Panel1MinSize = 190 };
         var sidebar = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12), BackColor = tree.BackColor };
@@ -40,7 +57,7 @@ public sealed class MainForm : Form
         split.Panel1.Controls.Add(sidebar); split.Panel2.Controls.Add(tabs);
         var bar = new StatusStrip(); bar.Items.Add(status); bar.Items.Add(new ToolStripStatusLabel("私有预览版 · 0.1.0"));
         Controls.Add(split); Controls.Add(toolbar); Controls.Add(bar);
-        Shown += (_, _) => { split.SplitterDistance = 250; if ((store.HasMasterPassword || store.Data.Credentials.Count > 0) && !EnsureVault()) status.Text = "未解锁主密码：已保存密码暂不可读，可连接并手动输入密码"; };
+        Shown += (_, _) => { split.SplitterDistance = 250; if ((configuration.HasMasterPassword || configuration.HasSavedCredentials) && !EnsureVault()) status.Text = "未解锁主密码：已保存密码暂不可读，可连接并手动输入密码"; };
         search.TextChanged += (_, _) => RefreshTree();
         tree.NodeMouseDoubleClick += (_, _) => Guard(ConnectSelected);
         tree.NodeMouseClick += (_, e) => tree.SelectedNode = e.Node;
@@ -64,11 +81,12 @@ public sealed class MainForm : Form
             shutdownPending = true;
             try
             {
-                foreach (var page in tabs.TabPages.Cast<TabPage>())
-                    if (page.Controls.OfType<FileView>().FirstOrDefault() is { } files) await files.CloseAsync();
-                foreach (var connection in connections.Values)
-                    if (connection is not FileView) connection.Dispose();
-                store.LockVault();
+                var closing = tabs.TabPages.Cast<TabPage>().SelectMany(page => page.Controls.OfType<FileView>()).Select(files => files.CloseAsync())
+                    .Concat(connections.Values.OfType<ITerminalSession>().Select(terminal => terminal.CloseAsync())).ToArray();
+                await Task.WhenAll(closing);
+                foreach (var connection in connections.Values.ToArray())
+                    if (connection is not (FileView or ITerminalSession)) connection.Dispose();
+                configuration.LockVault();
                 closeReady = true;
                 Close();
             }
@@ -82,6 +100,7 @@ public sealed class MainForm : Form
         Guid? selected = Selected?.Id;
         string? selectedGroup = tree.SelectedNode?.Tag as string;
         string filter = search.Text.Trim();
+        var savedSessions = configuration.GetSessions();
         tree.BeginUpdate(); tree.Nodes.Clear();
         var folders = new Dictionary<string, TreeNode>(StringComparer.OrdinalIgnoreCase);
         TreeNode Folder(string path)
@@ -95,11 +114,11 @@ public sealed class MainForm : Form
             if (string.Equals(path, selectedGroup, StringComparison.OrdinalIgnoreCase)) tree.SelectedNode = node;
             return node;
         }
-        foreach (string group in store.Data.Groups.Concat(store.Data.Sessions.Select(s => string.IsNullOrWhiteSpace(s.Group) ? "默认" : s.Group)).Append("默认").Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(g => g))
+        foreach (string group in configuration.GetGroups().Concat(savedSessions.Select(s => string.IsNullOrWhiteSpace(s.Group) ? "默认" : s.Group)).Append("默认").Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(g => g))
         {
             if (filter.Length == 0 || group.Contains(filter, StringComparison.OrdinalIgnoreCase)) Folder(group);
         }
-        foreach (var session in store.Data.Sessions.OrderBy(s => s.Name))
+        foreach (var session in savedSessions.OrderBy(s => s.Name))
         {
             string group = string.IsNullOrWhiteSpace(session.Group) ? "默认" : session.Group;
             if (filter.Length > 0 && !$"{session.Name} {session.Host} {session.Protocol} {group}".Contains(filter, StringComparison.OrdinalIgnoreCase)) continue;
@@ -108,7 +127,7 @@ public sealed class MainForm : Form
             node.ToolTipText = $"{session.Host}:{session.Port}";
             if (session.Id == selected) tree.SelectedNode = node;
         }
-        tree.ExpandAll(); tree.EndUpdate(); status.Text = $"{store.Data.Sessions.Count} 个已保存会话 · {(store.IsPortable ? "便携版 · INI" : "安装版配置")}";
+        tree.ExpandAll(); tree.EndUpdate(); status.Text = $"{savedSessions.Count} 个已保存会话 · {(store.IsPortable ? "便携版 · INI" : "安装版配置")}";
     }
     void NewGroup() => NewGroup(true);
     void NewGroup(bool nested)
@@ -118,20 +137,20 @@ public sealed class MainForm : Form
         if (name == null) return;
         if (name.Contains('/') || name.Contains('\\')) throw new ArgumentException("单个分类名称不能包含路径分隔符。");
         string path = parent == null ? name.Trim() : parent + "/" + name.Trim();
-        store.AddGroup(path); search.Clear(); RefreshTree();
+        configuration.AddGroup(path); search.Clear(); RefreshTree();
         TreeNode? Find(TreeNodeCollection nodes) { foreach (TreeNode node in nodes) { if (string.Equals(node.Tag as string, path, StringComparison.OrdinalIgnoreCase)) return node; var child = Find(node.Nodes); if (child != null) return child; } return null; }
         tree.SelectedNode = Find(tree.Nodes);
     }
     bool EnsureVault()
     {
-        if (store.IsVaultUnlocked) return true;
-        if (!store.HasMasterPassword) return CreateMasterPassword();
+        if (configuration.IsVaultUnlocked) return true;
+        if (!configuration.HasMasterPassword) return CreateMasterPassword();
         while (true)
         {
             var password = TextPrompt.AskWithSkip(this, "解锁密码库", "请输入主密码", secret: true);
             if (password == "") return false;
             if (password == null) return false;
-            try { store.UnlockVault(password); return true; }
+            try { configuration.UnlockVault(password); return true; }
             catch (System.Security.Cryptography.CryptographicException) { MessageBox.Show(this, "主密码不正确，或密码库数据已损坏。", "无法解锁", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         }
     }
@@ -144,17 +163,17 @@ public sealed class MainForm : Form
             var confirmation = TextPrompt.Ask(this, "确认主密码", "请再次输入主密码", secret: true);
             if (confirmation == null) return false;
             if (password.Length < 8 || password != confirmation) { MessageBox.Show(this, "两次输入必须一致，且至少 8 个字符。"); continue; }
-            try { store.SetMasterPassword(password); return true; }
+            try { configuration.SetMasterPassword(password); return true; }
             catch (Exception) { MessageBox.Show(this, "无法保存密码库或迁移旧密码。请检查配置目录权限，并在原 Windows 账户下重试；原配置不会被覆盖。", "密码库设置失败", MessageBoxButtons.OK, MessageBoxIcon.Error); return false; }
         }
     }
     void ConfigureMasterPassword()
     {
-        if (store.HasMasterPassword)
+        if (configuration.HasMasterPassword)
         {
             var current = TextPrompt.Ask(this, "修改主密码", "请先输入当前主密码", secret: true);
             if (current == null) return;
-            try { store.UnlockVault(current); }
+            try { configuration.UnlockVault(current); }
             catch (System.Security.Cryptography.CryptographicException) { MessageBox.Show(this, "主密码不正确，或密码库数据已损坏。"); return; }
         }
         if (CreateMasterPassword()) status.Text = "主密码已设置；密码库已解锁";
@@ -162,17 +181,18 @@ public sealed class MainForm : Form
     void Edit(Session? session)
     {
         if (session == null) session = new Session { Group = tree.SelectedNode?.Tag as string ?? (tree.SelectedNode?.Parent?.Tag as string) ?? "默认" };
-        string password = session is { SavePassword: true } && store.IsVaultUnlocked ? store.GetPassword(session.Id) : "";
-        using var editor = new SessionEditor(session, password, store.Data.Groups.Concat(store.Data.Sessions.Select(s => s.Group)));
+        string password = session is { SavePassword: true } && configuration.IsVaultUnlocked ? configuration.GetPassword(session.Id) : "";
+        using var editor = new SessionEditor(session, password, configuration.GetGroups().Concat(configuration.GetSessions().Select(s => s.Group)), capabilities: capabilities);
         if (editor.ShowDialog(this) != DialogResult.OK) return;
-        if (editor.Persist) { if (editor.Result.SavePassword && editor.Password.Length > 0 && !EnsureVault()) return; store.PutSession(editor.Result, editor.Password); RefreshTree(); }
+        if (editor.Persist) { if (editor.Result.SavePassword && editor.Password.Length > 0 && !EnsureVault()) return; configuration.SaveSession(editor.Result, editor.Password); RefreshTree(); }
         if (editor.ConnectNow) Connect(editor.Result, editor.Password);
     }
     void ConnectSelected()
     {
         if (Selected is not { } s) return;
+        if (!platform.GetAvailability(s.Protocol).IsAvailable) { Connect(s, ""); return; }
         string password = "";
-        if (s.SavePassword) { if (!store.IsVaultUnlocked) { MessageBox.Show(this, "当前未解锁主密码，请手动输入本次密码。", "密码库未解锁", MessageBoxButtons.OK, MessageBoxIcon.Information); } else password = store.GetPassword(s.Id); }
+        if (s.SavePassword) { if (!configuration.IsVaultUnlocked) { MessageBox.Show(this, "当前未解锁主密码，请手动输入本次密码。", "密码库未解锁", MessageBoxButtons.OK, MessageBoxIcon.Information); } else password = configuration.GetPassword(s.Id); }
         if (password.Length == 0 && s.Protocol is Protocol.SSH or Protocol.SFTP or Protocol.FTP)
         {
             var answer = TextPrompt.Ask(this, s.Name, s.PrivateKey.Length > 0 ? "私钥口令（未加密私钥可留空）" : "密码（本次使用，不保存）", secret: true);
@@ -186,53 +206,99 @@ public sealed class MainForm : Form
         if (InvokeRequired) return (bool)Invoke(() => Confirm(message));
         return MessageBox.Show(this, message, "SSH 主机身份验证", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
     }
-    void Connect(Session session, string password)
+    internal void Connect(Session session, string password)
     {
+        if (shutdownPending) return;
         session.Validate();
         var page = new TabPage(session.Name) { BackColor = Color.White, Tag = session }; tabs.TabPages.Add(page); tabs.SelectedTab = page;
+        OpenConnection(page, session, password);
+    }
+    void OpenConnection(TabPage page, Session session, string password)
+    {
+        var availability = platform.GetAvailability(session.Protocol);
+        if (!availability.IsAvailable) { ShowPlatformUnavailable(page, session, password, availability); return; }
         if (session.Protocol is Protocol.FTP or Protocol.SFTP)
         {
-            var files = new FileView(session, store, password, Confirm) { Dock = DockStyle.Fill }; connections[page] = files; page.Controls.Add(files);
+            var files = new FileView(session, configuration, password, Confirm) { Dock = DockStyle.Fill }; connections[page] = files; page.Controls.Add(files);
         }
         else if (session.Protocol == Protocol.RDP)
         {
-            try { RdpLauncher.Launch(session, store.DirectoryPath); RdpPage(page, session, password); }
-            catch { tabs.TabPages.Remove(page); page.Dispose(); throw; }
+            RdpPage(page, session, password);
         }
         else
         {
             var terminal = new TerminalView { Dock = DockStyle.Fill };
-            var connection = new TerminalConnection(session, store, password, Confirm); connections[page] = connection;
-            connection.Output += terminal.Append; terminal.Input += connection.Send; terminal.TerminalResized += (cols, rows) => { _ = Task.Run(() => connection.Resize(cols, rows)); };
-            page.Controls.Add(terminal); terminal.Focus();
+            var connectionStatus = new ConnectionStatusLabel { Dock = DockStyle.Bottom };
+            var connection = createTerminal(session, password, Confirm); connections[page] = connection;
+            connection.Diagnostic += OnDiagnostic;
+            page.Disposed += (_, _) => { connection.Diagnostic -= OnDiagnostic; connection.Output -= terminal.Append; };
+            connection.Output += terminal.Append; terminal.Input += connection.Send; terminal.TerminalResized += connection.Resize;
+            page.Controls.Add(terminal); page.Controls.Add(connectionStatus); terminal.Focus();
             _ = RunTerminal();
+            void OnDiagnostic(ConnectionDiagnostic diagnostic)
+            {
+                connectionStatus.Report(diagnostic);
+                if (diagnostic.State == ConnectionState.Failed)
+                    terminal.Append("\r\n\x1b[31m[" + DiagnosticPresenter.Error(diagnostic) + "]\x1b[0m\r\n");
+            }
             async Task RunTerminal()
             {
                 try { await connection.Run(terminal.Screen.Columns, terminal.Screen.Rows); }
-                catch (Exception e) { terminal.Append("\r\n\x1b[31m[连接失败：" + e.Message + "]\x1b[0m\r\n"); }
+                catch (Exception) { /* The diagnostic event has already presented the safe failure. */ }
             }
         }
+    }
+    void ShowPlatformUnavailable(TabPage page, Session session, string password, PlatformCapabilityStatus availability)
+    {
+        foreach (Control control in page.Controls.Cast<Control>().ToArray()) control.Dispose();
+        var panel = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(35), FlowDirection = FlowDirection.TopDown };
+        panel.Controls.Add(new Label { Name = "PlatformUnavailable", Text = PlatformCapabilityPresenter.ForProtocol(session.Protocol, availability),
+            AutoSize = true, MaximumSize = new Size(650, 0), ForeColor = Color.DarkRed });
+        var connectionStatus = new ConnectionStatusLabel { Width = 650 };
+        panel.Controls.Add(connectionStatus);
+        var retry = new Button { Text = "重新检查", AutoSize = true };
+        retry.Click += (_, _) => Guard(() =>
+        {
+            var current = platform.GetAvailability(session.Protocol);
+            if (!current.IsAvailable) { ShowPlatformUnavailable(page, session, password, current); return; }
+            string currentPassword = session.SavePassword && configuration.IsVaultUnlocked ? configuration.GetPassword(session.Id) : password;
+            foreach (Control control in page.Controls.Cast<Control>().ToArray()) control.Dispose();
+            OpenConnection(page, session, currentPassword);
+        });
+        panel.Controls.Add(retry); page.Controls.Add(panel);
+        connectionStatus.Report(new(Guid.NewGuid(), session.Protocol, ConnectionState.Failed, ConnectionStage.Validation,
+            ConnectionErrorCode.PlatformUnavailable, false, ""));
     }
     void RdpPage(TabPage page, Session s, string password)
     {
         var panel = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(35), FlowDirection = FlowDirection.TopDown };
-        panel.Controls.Add(new Label { Text = "远程桌面已在 Windows 客户端中打开", Font = new Font(Font.FontFamily, 15, FontStyle.Bold), AutoSize = true });
+        panel.Controls.Add(new Label { Text = "Windows 远程桌面", Font = new Font(Font.FontFamily, 15, FontStyle.Bold), AutoSize = true });
         panel.Controls.Add(new Label { Text = $"{s.Host}:{s.Port}  ·  {s.Username}\n\n使用系统窗口完成登录。关闭此标签不会关闭远程桌面窗口。", AutoSize = true, Margin = new Padding(0, 18, 0, 20) });
-        var open = new Button { Text = "再次打开远程桌面", AutoSize = true }; open.Click += (_, _) => Guard(() => RdpLauncher.Launch(s, store.DirectoryPath)); panel.Controls.Add(open);
+        var connectionStatus = new ConnectionStatusLabel { Width = 650 };
+        panel.Controls.Add(connectionStatus);
+        void Launch()
+        {
+            var availability = platform.GetAvailability(Protocol.RDP);
+            if (!availability.IsAvailable) { ShowPlatformUnavailable(page, s, password, availability); return; }
+            try { remoteDesktop.Launch(s, connectionStatus.Report); }
+            catch (Exception) { /* Launch diagnostics remain on this page, including its retry button. */ }
+        }
+        var open = new Button { Text = "打开远程桌面", AutoSize = true }; open.Click += (_, _) => Launch(); panel.Controls.Add(open);
         if (password.Length > 0)
         {
             var copy = new Button { Text = "复制会话密码（30 秒后清除）", AutoSize = true };
             var timer = new System.Windows.Forms.Timer { Interval = 30000 };
             copy.Click += (_, _) => Guard(() => { Clipboard.SetText(password); timer.Stop(); timer.Start(); });
             timer.Tick += (_, _) => { timer.Stop(); try { if (Clipboard.ContainsText() && Clipboard.GetText() == password) Clipboard.Clear(); } catch { } };
-            page.Disposed += (_, _) => { timer.Dispose(); try { if (Clipboard.ContainsText() && Clipboard.GetText() == password) Clipboard.Clear(); } catch { } };
+            panel.Disposed += (_, _) => { timer.Dispose(); try { if (Clipboard.ContainsText() && Clipboard.GetText() == password) Clipboard.Clear(); } catch { } };
             panel.Controls.Add(copy);
         }
         page.Controls.Add(panel);
+        Launch();
     }
     void Delete()
     {
-        if (Selected is { } s && MessageBox.Show(this, "删除会话及已保存的密码？\n" + s.Name, "删除会话", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes) { store.Delete(s.Id); RefreshTree(); }
+        if (Selected is { } s && MessageBox.Show(this, "删除会话及已保存的密码？\n" + s.Name, "删除会话", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes) { configuration.DeleteSession(s.Id); RefreshTree(); }
     }
     async void CloseTab()
     {
@@ -244,8 +310,9 @@ public sealed class MainForm : Form
         if (!tabs.TabPages.Contains(page)) return;
         if (!(confirm?.Invoke() ?? (MessageBox.Show(this, $"关闭标签“{page.Text}”？\n内嵌连接会断开，正在进行的文件操作将取消。\n外部远程桌面窗口不会随之关闭。", "确认关闭", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes))) return;
         if (page.Controls.OfType<FileView>().FirstOrDefault() is { } files) await files.CloseAsync();
+        if (connections.TryGetValue(page, out var active) && active is ITerminalSession terminal) await terminal.CloseAsync();
         if (!tabs.TabPages.Contains(page)) return;
-        if (connections.Remove(page, out var connection) && connection is not FileView) connection.Dispose();
+        if (connections.Remove(page, out var connection) && connection is not (FileView or ITerminalSession)) connection.Dispose();
         tabs.TabPages.Remove(page); page.Dispose();
         if (tabs.TabCount == 0) Welcome();
     }
@@ -255,13 +322,13 @@ public sealed class MainForm : Form
         if (dialog.ShowDialog(this) == DialogResult.OK)
         {
             if (MessageBox.Show(this, "仅导入你信任的会话配置。Shell 会话可在连接时运行其中的命令。\n继续导入？", "导入会话", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-            int count = store.Import(dialog.FileName); RefreshTree(); status.Text = $"已导入 {count} 个会话（不含密码及主机信任记录）";
+            int count = configuration.Import(dialog.FileName); RefreshTree(); status.Text = $"已导入 {count} 个会话（不含密码及主机信任记录）";
         }
     }
     void Export()
     {
         using var dialog = new SaveFileDialog { Filter = "PortHarbor 会话 (*.json)|*.json", FileName = "portharbor-sessions.json" };
-        if (dialog.ShowDialog(this) == DialogResult.OK) { store.Export(dialog.FileName); status.Text = "会话已导出，不包含密码及主机信任记录"; }
+        if (dialog.ShowDialog(this) == DialogResult.OK) { configuration.Export(dialog.FileName); status.Text = "会话已导出，不包含密码及主机信任记录"; }
     }
     void Welcome()
     {

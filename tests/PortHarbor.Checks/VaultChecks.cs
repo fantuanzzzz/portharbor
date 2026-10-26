@@ -8,13 +8,13 @@ internal static partial class Program
 {
     static void VaultAndGroups(string root)
     {
-        using var store = new Store(Path.Combine(root, "vault"));
+        using var store = new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root, "vault"), false));
         var session = new Session { Host = "localhost", SavePassword = true };
         Check(Throws<InvalidOperationException>(() => store.PutSession(session, "secret")), "saving a password requires master password setup");
         Check(Throws<ArgumentException>(() => store.SetMasterPassword("short")), "short master password is rejected");
         store.AddGroup(" 空分类 ");
         Check(Throws<ArgumentException>(() => store.AddGroup("空分类")), "duplicate category is rejected");
-        using (var reloaded = new Store(store.DirectoryPath)) Check(reloaded.Data.Groups.Contains("空分类") && reloaded.Data.Sessions.Count == 0, "empty category persists independently of sessions");
+        using (var reloaded = new Store(new WindowsSecretProtector(), TestPaths(store.DirectoryPath, false))) Check(reloaded.Data.Groups.Contains("空分类") && reloaded.Data.Sessions.Count == 0, "empty category persists independently of sessions");
         store.SetMasterPassword("master-password-1");
         store.PutSession(session, "会话密码-one");
         var second = session with { Id = Guid.NewGuid() };
@@ -36,7 +36,7 @@ internal static partial class Program
         Check(Throws<CryptographicException>(() => store.GetPassword(session.Id)), "modified credential authentication tag is rejected");
         store.Data.Credentials[session.Id.ToString()] = original;
         store.SetMasterPassword("master-password-2");
-        using (var restarted = new Store(store.DirectoryPath))
+        using (var restarted = new Store(new WindowsSecretProtector(), TestPaths(store.DirectoryPath, false)))
         {
             Check(!restarted.IsVaultUnlocked && Throws<CryptographicException>(() => restarted.UnlockVault("master-password-1")), "restart locks vault and rejects previous master password after change");
             restarted.UnlockVault("master-password-2");
@@ -45,16 +45,16 @@ internal static partial class Program
         string export = Path.Combine(root, "vault-export.json"); store.Export(export);
         var exported = JsonSerializer.Deserialize<AppData>(File.ReadAllText(export), Store.Json)!;
         Check(exported.Vault == null && exported.Credentials.Count == 0 && exported.Sessions.All(s => !s.SavePassword), "export omits vault metadata and credentials");
-        using (var imported = new Store(Path.Combine(root, "import-groups")))
+        using (var imported = new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root, "import-groups"), false)))
         {
             imported.Import(export);
             Check(imported.Data.Groups.Contains("空分类"), "export and import preserve empty categories");
         }
 
         string legacyPath = Path.Combine(root, "legacy-vault"); Directory.CreateDirectory(legacyPath);
-        var legacy = new AppData { SchemaVersion = 1, Sessions = [session], Credentials = new() { [session.Id.ToString()] = SecretProtection.Protect("legacy-secret") } };
+        var legacy = new AppData { SchemaVersion = 1, Sessions = [session], Credentials = new() { [session.Id.ToString()] = new WindowsSecretProtector().Protect("legacy-secret") } };
         File.WriteAllText(Path.Combine(legacyPath, "settings.json"), JsonSerializer.Serialize(legacy, Store.Json));
-        using var migrated = new Store(legacyPath);
+        using var migrated = new Store(new WindowsSecretProtector(), TestPaths(legacyPath, false));
         Check(Throws<InvalidOperationException>(() => migrated.GetPassword(session.Id)), "legacy credentials require migration before UI access");
         migrated.SetMasterPassword("migration-master");
         Check(migrated.Data.SchemaVersion == 2 && migrated.GetPassword(session.Id) == "legacy-secret", "legacy DPAPI credential migrates without data loss");
@@ -63,7 +63,7 @@ internal static partial class Program
         // A directory at the temporary-file path forces persistence failure before replacement.
         Directory.CreateDirectory(migrated.FilePath + ".tmp");
         Check(Throws<UnauthorizedAccessException>(() => migrated.SetMasterPassword("replacement-master")) && migrated.Data.Credentials[session.Id.ToString()] == previous && migrated.GetPassword(session.Id) == "legacy-secret", "failed master password change rolls back in-memory vault and preserves old key");
-        using var disk = new Store(legacyPath); disk.UnlockVault("migration-master");
+        using var disk = new Store(new WindowsSecretProtector(), TestPaths(legacyPath, false)); disk.UnlockVault("migration-master");
         Check(disk.GetPassword(session.Id) == "legacy-secret", "failed master password change preserves persisted vault");
     }
 }

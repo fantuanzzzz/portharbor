@@ -4,6 +4,335 @@ This workbook records every development session. Each entry covers what changed,
 
 本文档保留历史开发与验证记录；各条目的“下一步”表示当时的安排。当前阶段状态、任务勾选及验收条件统一维护在[技术方案第 8 节](TECHNICAL-PLAN.md#8-分阶段实施)，文件传输当前契约见[文件传输约定](FILE-TRANSFER.md)。历史条目不随当前实现变化而回写。
 
+## 2026-10-26 - 应用数据路径服务与配置目录边界
+
+### 本次开发内容与原因
+
+- Application 新增 `IAppDataPaths` 和不可变路径快照；Infrastructure 的 `Store`、JSON/INI 存储和 RDP 用例改为消费解析后的配置文件与临时目录，不再自行读取用户目录或程序目录。
+- Windows 平台新增 `WindowsAppDataPaths`，集中解析便携标志、`--portable`/`--installed`、`--data-dir`、安装默认目录和 EasyConnect 旧配置源，并把路径标准化为绝对路径。
+- 保持现有兼容规则：隐式安装默认目录可复制旧 JSON，旧源保留；便携模式、显式数据目录和已有目标不触发旧目录迁移；RDP 临时文件仍位于原配置目录；UI“打开配置目录”使用同一解析结果。
+- Store 校验配置文件必须位于配置目录内，拒绝越界路径；路径解析本身不创建目录，格式存储继续负责目录创建、空便携 INI、原子替换及损坏文件保留。
+- 增加路径解析、命令行优先级、迁移优先级、显式目录隔离、RDP 临时目录和路径边界检查；新增 ADR 0005，更新技术方案后续顺序。
+
+### 验证结果
+
+- Application 检查 92 项通过；核心路径检查最终 217 项通过，包含安装/便携、旧配置复制、显式目录、路径边界及既有协议/凭据回归。
+- Release 构建无警告、无错误；此前一次路径边界断言错误已修正后重新构建通过。
+- Windows/ConPTY 检查 14 项、WinForms UI 检查 45 项和协议回环 26 项均通过；最终发布命令重新执行 Application/核心/Windows 门禁、发布 EXE 启动退出冒烟并生成安装版与便携版 ZIP。
+
+### 边界与下一步
+
+- 本轮没有改变 JSON/INI 格式、DPAPI、配置文件名或 RDP 临时文件位置；真实串口、RDP 登录和路径符号链接策略仍未验证。
+- 下一步将 Windows 文件打开/保存对话框边界迁入平台项目，并保留导入/导出文件名、过滤器及无密码数据策略。
+
+## 2026-10-26 - 平台能力检测与连接入口提示
+
+### 本次开发内容与原因
+
+- Application 新增 `IPlatformCapabilities`、能力/不可用原因契约和 `PlatformConnectionPolicy`，仅为 Shell、Serial、RDP 查询各自运行前提，网络协议不依赖本地能力。
+- Windows 实现逐次检查系统目录中 DPAPI/ConPTY 所需导出及 mstsc 路径，不启动进程、不打开串口、不使用测试秘密；缺少组件、非 Windows 和探测失败返回固定原因，避免显示原始系统错误。
+- 会话编辑器提示不可用原因并禁用连接，仍可仅保存原协议；切换协议、窗口激活及点击连接时重新检查。串口列表为空或枚举失败不会阻止编辑其他协议，均支持手动输入端口。
+- MainForm 在创建终端/客户端资源及读取已保存 RDP 密码前检查本地能力；缺失页显示原因、稳定诊断与“重新检查”，恢复后在原标签继续连接。RDP 再次启动也检查能力；恢复已保存会话时从解锁密码库读取凭据，保留复制入口。
+- 新增“帮助 → 平台能力”概览，包含 Windows 凭据保护。替换 RDP 页面时同步释放该页面的剪贴板计时器；没有改动密码库格式、数据目录、依赖或锁文件。
+- 新增 ADR 0004，更新 README、终端约定与技术方案状态/后续顺序。
+
+### 验证结果
+
+- Application 与主程序/检查项目 Release 构建通过，最终 0 警告、0 错误；差异空白检查通过。
+- Application 检查 92 项、核心检查 203 项通过，新增能力映射、网络协议不受限、状态恢复、探测无副作用、缺失组件、探测失败和无效能力检查。
+- Windows 检查 14 项通过，验证当前系统实际 DPAPI/ConPTY/串口运行支持与启动器使用的 mstsc 路径一致，原密码库迁移及进程清理检查继续通过。
+- WinForms UI 检查 45 项通过，覆盖三个本地协议不可用时仍能保存、空/失败串口枚举可手输、切换网络协议、点击前复查、阻止资源创建、缺失状态重查、原标签恢复、已保存密码恢复及 RDP 再次启动前复查；终端界面输出包含 `CONPTY_OK`。
+- FTP/SFTP/SSH/Telnet 本机回环 26 项通过。
+- 完整 `build.ps1 -OutputDirectory artifacts/platform-capabilities/release` 成功，锁定恢复、Application/核心/Windows 门禁、发布 EXE 启动/退出冒烟通过；安装版与便携版目录和 ZIP 均生成。
+- 报告及产物位于 ignored `artifacts/platform-capabilities/`，最终 Application/核心/Windows 报告位于 `release/`。
+
+### 边界与下一步
+
+- 运行能力可用不保证设备存在/未占用、用户拥有访问权限或远程认证成功；实际连接错误继续沿用诊断。真实串口与 RDP 登录仍需实机验收，没有新增操作系统支持。
+- 下一步定义应用数据路径服务，隔离安装/便携配置、旧目录迁移及 RDP 临时文件路径策略，保持既有目录和凭据兼容；之后继续 Windows 文件选择器和导入导出业务策略。
+
+## 2026-10-26 - DPAPI 凭据保护与 mstsc 平台隔离
+
+### 本次开发内容与原因
+
+- Application 新增 `ISecretProtector` 与 `IRemoteDesktopLauncher`；DPAPI 实现迁为 Windows 平台项目的 `WindowsSecretProtector`，原用户作用域、描述字符串、密文编码、密码库算法及参数不变。
+- `Store` 构造时显式注入机密保护器，Infrastructure 不依赖平台项目；程序入口及检查调用方完成装配。锁定密码库在调用平台保护前即拒绝保存，平台失败不会回退为便携保护或修改会话。
+- RDP 校验、配置文本生成与诊断迁为 Application 的 `RdpLauncher`。Windows 实现负责 UTF-16 临时文件、系统 mstsc 路径、独立文件参数、启动失败和进程退出清理；UI 经用例启动及重试，继续区分外部客户端启动与远程认证成功。
+- 补充无平台依赖的 RDP 用例检查、安装/便携库改密转换和保护失败检查，以及真实 DPAPI、受控进程退出清理与 RDP 界面重试检查。框架错误分类补充 `PlatformNotSupportedException` 为平台不可用。
+- 新增 ADR 0003，更新 README 与技术方案阶段清单和后续顺序。未引入依赖或调整锁文件。
+
+### 验证结果
+
+- 独立 Application 与主程序/检查项目 Release 构建通过，最终 0 警告、0 错误。
+- Application 检查 86 项、核心检查 189 项、Windows 检查 12 项通过；覆盖旧 DPAPI 迁移、便携库不调用平台保护、双向显式改密转换、保护失败保持文件/密钥、篡改密文拒绝，以及 RDP 配置/诊断/退出清理。
+- WinForms UI 检查 27 项通过，新增 RDP 页面平台注入、启动失败提示与再次启动；终端界面输出包含 `CONPTY_OK`。
+- FTP/SFTP/SSH/Telnet 本机协议回环 26 项通过。
+- 完整 `build.ps1 -OutputDirectory artifacts/windows-services/release` 成功，锁定恢复、应用/核心/Windows 门禁、发布 EXE 启动/退出冒烟全部通过，安装版与便携版目录和 ZIP 已生成。
+- 首次 UI 检查结束时因新用例留下 RDP 标签而停在交互式退出确认；修正测试清理后重跑通过。期间一次检查项目重建因旧测试进程占用 apphost 失败，进程结束后最终构建通过。产品逻辑未因此改变。
+- 结果报告与产物在 ignored `artifacts/windows-services/`，其中最终 Application/核心/Windows 报告位于 `release/`；差异空白检查通过。
+
+### 边界与下一步
+
+- 本次推进技术方案中的 Windows 平台隔离。真实 mstsc 登录、实体串口互通仍未验证；Infrastructure 暂保留 Windows 目标，路径/文件选择器和平台能力报告尚待实施。
+- 下一步实施平台能力报告，并接入会话编辑器与连接入口，让本地 Shell、串口或 RDP 不可用时说明原因；之后继续隔离 Windows 路径/文件选择器，再推进导入导出业务策略。
+
+## 2026-10-26 - Windows 终端平台项目与串口设备端口
+
+### 本次开发内容与原因
+
+- 建立 `PortHarbor.Platform.Windows`（`net8.0-windows`），只引用 Application 与原有 System.IO.Ports 8.0.0；平台实现不引用 WinForms、网络 Infrastructure、SSH.NET 或 FluentFTP。
+- 将 ConPTY 从 UI 项目迁入平台项目，将过渡 Windows 终端适配器拆为独立 `LocalShellTerminalTransport` 与 `SerialTerminalTransport`，由 `WindowsTerminalTransportFactory` 显式选择协议。保留 Shell 参数、工作目录、串口参数、退格转换和可等待关闭语义。
+- 无平台调用的 `StreamTerminalTransport` 从 Infrastructure 移入 Application，供网络与 Windows 适配器共用同一启动/中止/释放策略，避免平台项目依赖网络厂商库。
+- Application 新增 `ISerialPortProvider`，由 Windows 提供设备名及校验/停止位/流控的字符串选项；会话编辑器通过端口读取，移除 UI 中 System.IO.Ports 类型使用和直接包引用。既有配置字符串与用户目录保持兼容。
+- 增加平台依赖方向、工厂选择/拒绝、预取消、编辑器注入和关闭空闲 ConPTY Shell 的检查。平台项目随主程序/检查项目的依赖图进入现有 CI 与发布流程；新增平台锁文件并更新主项目锁。
+- 更新 README、终端约定、技术方案及 ADR 0002 的平台复审记录。
+
+### 验证结果
+
+- 平台项目独立及主程序/检查项目 Release 构建通过，最终 0 警告、0 错误。首次沙箱恢复出现 NuGet 漏洞源不可达的 NU1900，随后在允许联网环境下强制锁定恢复成功，最终构建和发布未再出现告警。
+- Application 独立检查 77 项、核心检查 179 项通过；新增 5 项平台工厂、程序集边界和预取消检查。
+- Windows/ConPTY 检查 4 项通过，包含输入/输出/resize/正常退出、启动失败以及关闭空闲 Shell 等待进程清理。
+- WinForms UI 检查 25 项通过，包含串口编辑器通过注入端口读取设备和参数选项；界面终端输出包含 `CONPTY_OK`。
+- FTP/SFTP/SSH/Telnet 本机回环检查 26 项通过，验证共享流基类迁移后网络连接及取消行为。
+- 完整 `build.ps1 -OutputDirectory artifacts/windows-terminals/release` 成功，锁定恢复、Application/核心/Windows 门禁、安装版发布 EXE 启动/退出冒烟全部通过，两个目录与 ZIP 均已生成。报告及产物位于 ignored `artifacts/windows-terminals/`。
+- 最终差异空白检查通过。
+
+### 边界与下一步
+
+- 本轮完成 Windows 平台隔离的终端部分。真实串口设备互通仍未验证；DPAPI 保留在存储 Infrastructure，mstsc 和路径/文件选择器仍在 UI，平台能力报告尚未实施。
+- 下一步定义机密保护与远程桌面启动端口，将 DPAPI/mstsc 接入 Windows 平台项目，继续验证安装版凭据迁移、便携密码库及 RDP 配置/启动失败兼容性；之后完善能力报告及其余平台服务边界。
+
+## 2026-10-26 - 终端用例、网络适配器与可等待关闭
+
+### 本次开发内容与原因
+
+- 在 Application 定义 `ITerminalSession`/`ITerminalTransport`，将 `TerminalConnection` 从 UI 迁入 Application，集中处理一次性启动、配置校验、UTF-8 增量解码、输入/resize 顺序、诊断及关闭生命周期，不引用 WinForms、SSH.NET、串口或 Win32。
+- SSH/Telnet 协议实现迁入 Infrastructure，SSH 使用原生 ConnectAsync 和共享主机信任逻辑，Telnet 适配器负责协商/转义与异步 TCP I/O。UI 移除 SSH.NET 直接引用并更新锁文件，依赖版本和哈希不变。
+- `StreamTerminalTransport` 管理启动中资源登记及永久中止。中止后才创建的资源立即释放，异步释放等待启动返回及资源清理，避免关闭后出现未被追踪的客户端/流。
+- 串口/ConPTY 暂由 UI 项目中的 Windows 过渡适配器接入端口；组合入口 `TerminalConnectionFactory` 根据协议装配用例。此处尚未建立独立 Windows 平台项目。
+- MainForm 绑定终端会话接口，关闭标签及应用退出均等待 CloseAsync 后才销毁控件；同时断开控件的终端输出订阅。输入入队时复制数据，取消后不再发送排队命令。
+- 增加共享终端用例检查、流适配器晚资源检查、真实网络取消检查，以及终端标签/软件退出等待清理的 UI 检查。补充终端契约文档及 ADR 0002，更新技术方案与 README。
+
+### 验证结果
+
+- 独立 Application 和主程序/检查项目 Release 构建均通过，最终 0 警告、0 错误。
+- Application 检查 77 项、核心检查 174 项通过；新增覆盖输入复制/顺序、resize 串行、分片 UTF-8、远端 EOF、预取消、重复 Run 拒绝、晚启动、阻塞写入、异步释放及失败诊断。
+- Windows/ConPTY 检查 3 项、WinForms UI 检查 24 项通过，界面终端输出包含 `CONPTY_OK`。UI 新增关闭标签/软件退出等待终端清理检查。
+- 首次新增网络取消检查因测试会话缺少用户名，在 SSH.NET 参数校验时提前失败，表现为监听端等待超时；补齐专用测试用户名，并使检查在连接任务提前失败时直接传播错误。修复后协议回环 26 项通过，包括 SSH 不返回握手 banner 与 Telnet 不发送数据时取消。
+- 完整 `build.ps1 -OutputDirectory artifacts/terminal-layering/release` 成功：锁定恢复、Application/核心/Windows 门禁、发布 EXE 启动/退出冒烟全部通过；安装版与便携版目录及 ZIP 均已生成。
+- 最终报告位于 ignored `artifacts/terminal-layering/`（协议最终报告为 `integration-results-final.json`），最终差异空白检查通过。
+
+### 边界与下一步
+
+- SSH channel/读取及 Windows 同步管道仍借助工作线程和关闭所属资源中断，不表示所有底层 I/O 已原生异步；终端用户可配置超时、自动重连、真实串口及更多服务器兼容性仍待后续验收。
+- 下一步建立 `PortHarbor.Platform.Windows`，先迁入串口、本地 Shell 和 ConPTY 适配器，保留统一终端端口及关闭契约；随后分离 DPAPI/mstsc，接入平台能力报告，并继续保持旧配置和 Windows 行为兼容。
+
+## 2026-10-26 - 文件传输用例与协议适配器分层
+
+### 本次开发内容与原因
+
+- 将 `FileConnection` 和共享超时策略从 WinForms 项目迁入 Application，目标仍为 `net8.0`，仅依赖 Domain。通过公开构造函数注入 `IRemoteFileSystem`，维持操作串行、超时、取消、临时文件提交、进度及异步关闭语义。
+- 将 FTP/SFTP 适配器、工厂和厂商异常分类迁入 Infrastructure；FluentFTP 的直接包引用随适配器迁移，版本及依赖哈希不变，补齐 Infrastructure 锁文件并验证锁定恢复。
+- Application 提供无厂商依赖的默认 `ConnectionErrorPolicy`，实际协议工厂注入 `DiagnosticClassifier`，保持 SSH.NET 认证/超时/协议异常的现有分类。
+- 共享 SSH 认证和主机指纹配置抽入 Infrastructure 的 `SshClientSupport`，终端 SSH 与 SFTP 共同使用，消除 SFTP 对 UI 中 `TerminalConnection` 的依赖。
+- 将内存远端文件系统与既有传输策略检查放入 `tests/Shared`，由独立 Application 检查和 Windows 检查共用；增加传输用例所在程序集及依赖方向检查。更新 README、技术方案和文件传输约定。
+
+### 验证结果
+
+- 独立 Application 及主程序/检查项目 Release 构建通过，0 警告、0 错误。
+- Application 检查 56 项、核心检查 150 项通过，包含取消保留原目标、失败清理、超时、连接重试、关闭等待及排队连接超时竞态。
+- Windows/ConPTY 检查 3 项、WinForms UI 检查 20 项通过，终端界面输出包含 `CONPTY_OK`。
+- FTP/SFTP/SSH/Telnet 本机回环 24 项通过，包含 Unicode 文件、覆盖、取消、主机信任拒绝/变更和 SFTP 认证失败分类。
+- 完整 `build.ps1 -OutputDirectory artifacts/file-transfer-layering/release` 成功：锁定恢复、重复执行 Application/核心/Windows 门禁及发布 EXE 启动/退出冒烟通过；安装版、便携版目录与 ZIP 均已生成。
+- 报告及发布产物位于 ignored `artifacts/file-transfer-layering/`，最终差异空白检查通过。
+
+### 边界与下一步
+
+- 文件传输用例已可脱离 WinForms 和厂商库构建/检查；Infrastructure 仍包含 DPAPI，目标保持 `net8.0-windows`。本次未升级依赖，也未验证 FTPS、真实串口或新的服务器实现。
+- 下一步定义终端会话端口，将终端生命周期、输入队列、取消与关闭编排迁入 Application，先抽出 SSH/Telnet 适配器并覆盖启动中取消、远端断开及关闭竞态；随后隔离串口、本地 Shell、ConPTY、DPAPI 和 mstsc 等平台实现。
+
+## 2026-10-26 - 独立存储基础设施及失败回滚
+
+### 本次开发内容与原因
+
+- 新建 `PortHarbor.Infrastructure`，目标 `net8.0-windows`，只引用 Application，不引用 WinForms 或第三方协议库。
+- 将 Store、AppData、JSON/INI 编解码、主密码 AES/PBKDF2 和 DPAPI 实现移出 UI 项目；`ConfigurationFileStorage` 处理格式校验、路径和原子文件替换，`StoredVault` 管理密钥/凭据迁移，`StoredHostKeyTrust` 管理指纹确认与保存。
+- 适配器共享 `ConfigurationState` 和写入锁，维持同一配置文件中会话、密码和主机指纹的一致性。Store 保留兼容入口，用户配置路径和密文格式不变；命令行存储模式解析仍在 Windows UI 入口。
+- 主机密钥拒绝异常移入 Application，存储适配器和 SSH/SFTP 诊断分类共用同一类型。
+- 修复导入保存失败时内存会话/分类未回滚，以及指纹保存失败后仍被内存视作已信任的问题；失败后保留原文件，后续连接必须重新确认该指纹。
+
+### 验证结果
+
+- Infrastructure 独立 Release 构建及主程序/检查项目 Release 构建：0 警告、0 错误。
+- 核心检查 149 项通过，包含 JSON v1/v2、DPAPI 凭据迁移、便携 INI、密码库改密/会话保存回滚及新增 17 项存储边界检查。
+- Windows/ConPTY 检查 3 项、WinForms UI 检查 20 项通过，终端界面输出包含 `CONPTY_OK`。
+- Application 独立检查 17 项、FTP/SFTP/SSH/Telnet 回环检查 24 项通过，报告位于 ignored `artifacts/storage-adapters/`。
+- 锁定恢复和 `git diff --check` 通过。完整 `build.ps1 -OutputDirectory artifacts/storage-adapters/release` 成功，构建无警告/错误，发布安装版与便携版目录及 ZIP，安装版发布 EXE 启动/退出冒烟通过。
+
+### 边界与下一步
+
+- Infrastructure 仍是 Windows 项目，保留 DPAPI；本次不表示已支持其他操作系统，也未将 ConPTY、mstsc 或协议厂商适配器移出 UI 项目。
+- 下一步继续抽取连接编排与文件传输用例，再隔离协议适配器和其余 Windows 平台服务。
+
+## 2026-10-26 - Application 配置、密码库与主机信任端口
+
+### 本次开发内容与原因
+
+- Application 增加 `IConfigurationRepository`、`IVault` 和 `IHostKeyTrust`，由 `ConfigurationService` 组合会话用例、分类、导入导出、主密码生命周期和主机指纹决策。
+- 主界面通过配置服务执行分类、JSON 导入导出、凭据读取/解锁/迁移/锁定；终端 SSH 和 SFTP 客户端只依赖 `IHostKeyTrust`。
+- `Store` 作为兼容适配器实现上述端口，仍维持 JSON/便携 INI 格式、密码加密、首次指纹确认和用户数据目录不变。
+- 跨平台 Application 检查增加接口委托覆盖；Windows 侧继续以 v1/v2 和便携配置 fixture 核验适配行为。
+
+### 验证结果与边界
+
+- Application 独立 Release 构建：0 警告、0 错误；主项目/Windows 检查 Release 构建通过。
+- 配置、密码库及主机信任 mock 检查纳入新的 Application 检查入口，共 17 项通过；完整核心检查 132 项通过，Windows/ConPTY 检查 3 项通过，WinForms UI 检查 20 项通过。
+- FTP/SFTP/SSH/Telnet 本机回环检查 24 项通过，包含主机信任端口接线、错误密码、拒绝主机密钥、主机密钥变更和 SFTP 认证失败分类。
+- 当前 Store 类仍同时包含文件格式、凭据加密和主机指纹持久化，独立基础设施仓储尚未完成；本轮只完成 Application 端口和兼容适配。
+- NuGet 漏洞源当前网络不可达，Windows 包项目恢复可能出现 `NU1900` 网络告警。
+
+### 下一步
+
+- 运行核心/UI/Windows 与协议服务回环回归；随后再拆 JSON/INI 持久化、密码库加密和主机信任存储实现。
+
+## 2026-10-26 - Application 会话用例与配置兼容性
+
+### 本次开发内容与原因
+
+- 新建 `src/PortHarbor.Application`（`net8.0`），定义 `ISessionRepository` 和 `SessionService`，承载会话读取、创建、编辑、删除、校验和密码保存策略；Application 不引用 WinForms、DPAPI 或协议厂商库。
+- WinForms 主界面通过 `SessionService` 读取树、保存编辑结果和删除会话；`Store` 实现仓储端口，底层 JSON/INI、凭据和主机信任实现暂留原项目，避免改变用户目录和配置格式。
+- 会话写入改为先生成新快照，再持久化；保存/删除失败恢复内存中的会话和凭据字典，避免 UI 看到未落盘状态。
+- 添加 v1/v2 JSON fixture、便携 INI 检查，以及旧凭据迁移、ID/密码关联、分类和主机信任保留、创建/编辑/删除失败回滚检查。
+
+### 验证结果
+
+- Application 独立 Release 构建：0 警告、0 错误；独立检查 11 项通过。
+- 主程序及检查项目 Release 构建通过；完整核心检查 **132 项通过**，包含新增配置兼容性检查。
+- 上一轮 UI 20 项和 ConPTY 冒烟已通过；本次 Application 接入后尚未重新执行 UI 检查，下一轮补跑。
+- 报告：ignored `artifacts/application-validation/application-results.json`（11 项）和 `artifacts/application-validation/unit-results.json`（132 项）。
+- 锁定恢复路径已验证；NuGet 漏洞源在当前网络不可达时仍会产生 `NU1900` 网络告警，不影响本地锁定构建。
+
+### 下一步
+
+- 将导入导出、主机信任和凭据解锁继续抽成 Application 端口，随后补跑 UI/Windows/协议回归并更新 CI 的独立项目门禁。
+
+## 2026-10-26 - 终端状态模型迁入 Domain
+
+### 本次开发内容与原因
+
+- 将 `TerminalScreen` 和 `Cell` 原样迁入 `src/PortHarbor.Domain/TerminalScreen.cs`，由主程序的项目引用提供，保持现有命名空间及终端解析行为。
+- Domain 保留 `System.Drawing.Color` 基础值类型；不引用 WinForms、GDI 渲染组件或第三方协议库，目标仍为 `net8.0`。
+- 检查入口增加 `--terminal`，复用既有终端和 Telnet 检查，可独立于存储、DPAPI 和 UI 运行。
+- 同步 README 和技术方案，修正阶段 2 仍显示“未开始”的过期状态。
+
+### 修改文件
+
+- 新增 `src/PortHarbor.Domain/TerminalScreen.cs`，删除原 `src/PortHarbor/TerminalScreen.cs`。
+- `src/PortHarbor/PortHarbor.csproj` 移除已删除源文件的多余编译排除项。
+- `tests/PortHarbor.Checks/Program.cs`、`README.md`、`docs/TECHNICAL-PLAN.md`、本日志。
+
+### 验证结果与边界
+
+- Domain 独立 Release 构建通过；主程序及检查项目 Release 构建通过，均为 0 警告、0 错误。
+- `--terminal` 检查 16 项通过，覆盖中文宽字符、ANSI/真彩色、备用屏幕、清行、光标查询、缩放、输入模式、分片代理字符、异常 ANSI 参数和 Telnet 协商/转义。
+- 报告：ignored `artifacts/terminal-domain/terminal-results.json`。
+- 完整 `--unit` 测试停在沙箱外 DPAPI 执行的权限确认，本轮被中断，未生成结果；本次未执行 UI、ConPTY 或协议服务回环回归，不沿用历史结果作为本次验收。
+- 当前验证环境仍为 Windows；独立 `net8.0` 构建通过不代表已经完成 Linux/macOS 实机运行验收。
+
+### 下一步
+
+- 拆分 Application 项目与配置仓储/凭据端口，保持旧配置读取和迁移兼容；补跑完整核心及 UI 回归。
+
+## 2026-10-26 - 终端与 RDP 诊断统一
+
+### 本次开发内容与原因
+
+- 将终端连接的校验、连接、认证、主机密钥、通道、读写和关闭阶段通过安全状态栏呈现；失败保留稳定错误码与短操作编号，关闭清理不会覆盖失败信息。
+- RDP 启动改为带诊断回调的生命周期：配置校验、临时文件写入、启动 Windows 客户端和启动失败均可定位；页面保留重试入口，不把外部客户端启动等同于远程登录成功。
+- 修正 SSH.NET 认证异常、超时、网络包装异常、主机密钥拒绝和协议异常的分类顺序；诊断展示不再包含原始异常、主机、路径、密码或终端控制字符。
+- 增加核心、UI 和协议检查，覆盖错误密码、拒绝主机密钥、主机密钥变更、SFTP 认证失败、拒绝连接、RDP 启动失败及后台线程诊断更新。
+
+### 修改文件
+
+- `src/PortHarbor/Diagnostics.cs`、`DiagnosticPresenter.cs`、`ConnectionStatusLabel.cs`
+- `src/PortHarbor/TerminalConnection.cs`、`MainForm.cs`、`RdpLauncher.cs`、`Models.cs`
+- `src/PortHarbor/RemoteFileSystems/SftpRemoteFileSystem.cs`
+- `tests/PortHarbor.Checks/DiagnosticChecks.cs`、`DiagnosticUiChecks.cs`、`Program.cs`
+- `docs/TECHNICAL-PLAN.md`、本开发日志
+
+### 验证结果
+
+- Release 构建：0 警告、0 错误。
+- 核心检查：113 项通过；Windows/ConPTY 检查：3 项通过；UI 检查：20 项通过。
+- 本机 FTP/SFTP/SSH/Telnet 回环：24 项通过，包含新增 SSH/SFTP 认证与主机密钥失败分类检查。
+- 报告保存在 ignored `artifacts/diagnostics-validation/`；UI 截图和终端输出也已生成。
+
+### 仍存在的问题与边界
+
+- SSH、SFTP 底层库仍可能通过同步资源释放关闭连接；串口实体设备、FTPS、私钥认证和真实 RDP 登录仍未完成实机兼容性验证。
+- 终端 I/O 的部分第三方同步调用仍使用后台任务包装；统一取消、超时和关闭等待需要后续继续抽取。
+
+### 下一步
+
+- 补齐串口、FTPS、私钥认证和更广服务器的兼容性矩阵，继续覆盖终端后台 I/O 的取消、超时和进程退出竞态。
+- 完成阶段 0 的格式检查、锁定恢复、发布冒烟和回滚故障注入，再开始 Domain/Application 内核拆分。
+
+## 2026-10-26 - 工程门禁与发布冒烟
+
+### 本次开发内容与原因
+
+- `build.ps1` 和 Windows CI 现在使用 `dotnet restore --locked-mode`，并在构建前执行 `git diff --check`，防止锁文件漂移和新增差异出现空白错误。
+- 发布到 staging 后自动以 `--smoke --installed --data-dir` 启动真实 `PortHarbor.exe`，创建临时空配置并验证主窗口初始化、关闭和进程退出；失败时不会替换现有发布目录或 ZIP。
+- 应用入口增加 smoke 模式，启动失败返回非零退出码且不弹出阻塞对话框，正常用户启动行为保持不变。
+
+### 验证结果
+
+- 完整 `build.ps1 -OutputDirectory artifacts/engineering-validation` 成功；锁定恢复、差异空白检查、发布和发布 EXE 启动冒烟均通过。
+- 构建内核心检查 113 项、Windows/ConPTY 检查 3 项通过；发布输出包含 installed/portable 两个目录和对应 ZIP。
+- 恢复过程中 NuGet 漏洞源因网络不可达产生 `NU1900` 警告，但锁定依赖、编译和运行检查均成功；该网络告警仍应在 CI 网络环境复核。
+- `tests/build-rollback.ps1` 使用模拟替换后失败验证旧 installed/portable 目录和两个 ZIP 均保留，staging 目录被清理。
+
+### 修改文件
+
+- `src/PortHarbor/Program.cs`
+- `build.ps1`、`.github/workflows/windows-ci.yml`
+- `docs/TECHNICAL-PLAN.md`、本开发日志
+
+### 下一步
+
+- 在独立干净 checkout 复核完整构建，再开始 Domain/Application 项目边界设计。
+
+## 2026-10-26 - Domain 内核第一切片
+
+### 本次开发内容与原因
+
+- 新建 `src/PortHarbor.Domain`，目标框架为 `net8.0`，不引用 WinForms、Windows API、SSH.NET、FluentFTP 或存储实现。
+- 将 `Session`、协议枚举、配置校验、连接状态/阶段/错误码/诊断记录和 Telnet 编解码迁入 Domain；现有 WinForms 项目通过项目引用继续使用相同命名空间和数据契约。
+- 将 `RemoteEntry`、传输方向/进度记录、`IFileTransfer` 和 `IRemoteFileSystem` 迁入 Domain；FTP/SFTP 工厂和厂商适配器仍留在原项目。
+- 保持 `Store`、密码库、平台服务和协议适配器留在原项目，避免本次边界抽取改变配置格式或运行时行为。
+
+### 修改文件
+
+- `src/PortHarbor.Domain/PortHarbor.Domain.csproj`
+- `src/PortHarbor.Domain/Session.cs`、`ConnectionContracts.cs`、`TelnetCodec.cs`、`FileTransferContracts.cs`
+- `src/PortHarbor/Models.cs`、`Diagnostics.cs`、`PortHarbor.csproj`、`packages.lock.json`
+- 删除原 `src/PortHarbor/TelnetCodec.cs`
+- `docs/TECHNICAL-PLAN.md`、本开发日志
+
+### 验证结果
+
+- Domain 项目独立 Release 构建：0 警告、0 错误。
+- 主项目及 `PortHarbor.Checks` Release 构建：0 警告、0 错误。
+- 项目引用已更新到锁文件；`dotnet restore --locked-mode` 已验证完整恢复路径。
+
+### 仍存在的问题与边界
+
+- `TerminalScreen` 和应用用例仍在 WinForms 项目中；本切片只建立 Domain 边界，不代表阶段 2 完成。
+
+### 下一步
+
+- 迁移终端屏幕状态和文件传输纯契约，随后拆出 Application 项目和配置仓储端口。
+
 ## 2026-10-22 - Connection diagnostics baseline
 
 ### What was developed

@@ -33,6 +33,8 @@
 
 菜单分为「文件 / 会话 / 窗口 / 设置 / 帮助」，各项操作在下拉菜单中。
 
+「帮助 → 平台能力」可查看本地 Shell、串口、RDP 及 Windows 凭据保护的运行支持。缺少支持时，编辑器会说明原因并禁用连接，仍可仅保存会话；已有会话的连接页提供「重新检查」，系统支持恢复后可继续连接。串口列表为空或无法读取时仍允许手动输入端口；能力可用不保证设备访问或远程登录成功。
+
 「会话 → 新建根分类」创建顶层文件夹；选中文件夹后用「新建子分类」或右键同名操作创建下一级，可继续嵌套。空分类也会保存。文件夹、终端、远程桌面和文件传输有不同图标。新建会话默认使用当前分类，编辑器支持输入 `工作/交换机/核心` 这样的完整路径；`/` 是分类层级分隔符。搜索命中深层会话时保留祖先文件夹。
 
 终端默认选择已安装的 Consolas，并依次尝试 Cascadia Mono、Lucida Console、Courier New 和系统等宽字体；按字体及 DPI 计算字符格。终端右键菜单可打开字体、字号、样式、前景色和背景色设置；左键自动复制与右键直接粘贴也可在菜单中分别启用。
@@ -51,7 +53,7 @@ RDP 在系统窗口中打开，登录由 Windows 客户端处理。PortHarbor �
 
 便携包带有 `PortHarbor.portable` 标记；程序旁已有 INI 也会识别为便携模式。可显式使用 `--portable` 或 `--installed`；`--data-dir <目录>` 在两种模式下都可覆盖数据目录。便携版必须放在可写目录，写入失败时提示错误，不静默切换到用户目录。现有安装版 JSON 不会自动复制到便携版；可通过不含密码的导出/导入迁移会话后重新保存密码。
 
-「设置 → 打开配置目录」可查看实际目录。写入使用临时文件与原子替换，`.bak` 保留前一次配置；首次启动便携版就会建立空 INI。损坏配置会被保留并报告错误。
+「设置 → 打开配置目录」可查看实际目录。启动参数和便携标志由 Windows 平台路径服务统一解析；显式 `--data-dir` 只使用指定目录，不会从默认 EasyConnect 位置复制旧配置。写入使用临时文件与原子替换，`.bak` 保留前一次配置；首次启动便携版就会建立空 INI。损坏配置会被保留并报告错误。
 
 密码保存在对应配置的 `Credentials` 中。首次保存非空密码必须设置至少 8 位的主密码并重复确认；之后启动已有密码库时可输入主密码解锁；也可以点击“跳过”进入软件，此时已保存密码不可读取，连接时需临时输入。「设置 → 主密码」可设置或修改，修改前验证当前口令。主密码不会写入磁盘；遗忘后无法恢复密码。
 
@@ -94,12 +96,20 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 .\build.ps1 -Dotnet 'D:\Code\rea-work\tools\dotnet\dotnet.exe' -PackageSource 'D:\Code\rea-work\tools\nuget-feed'
 ```
 
-脚本在项目内缓存构建数据，恢复依赖、编译并执行检查，然后同时生成安装版目录布局和便携版 ZIP，放在 `artifacts`。默认都不包含 .NET 环境；需要包含时运行 `./build.ps1 -IncludeRuntime`。安装向导尚未实现。依赖版本与哈希见 `src\PortHarbor\packages.lock.json`。
+脚本在项目内缓存构建数据，使用锁定模式恢复依赖，执行差异空白检查、编译、核心/Windows 检查和发布包启动冒烟，然后同时生成安装版目录布局和便携版 ZIP，放在 `artifacts`。默认都不包含 .NET 环境；需要包含时运行 `./build.ps1 -IncludeRuntime`。安装向导尚未实现。依赖版本与哈希见 `src\PortHarbor\packages.lock.json`。
 
 若旧发行目录中的程序仍在运行，可通过 `./build.ps1 -OutputDirectory ./artifacts/preview` 输出到独立目录，避免覆盖正在使用的文件。切换新版前先关闭旧程序，同一配置目录不要同时运行两版。
 
+发布回滚可在当前 Windows 用户环境复核：`powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\build-rollback.ps1 -OutputDirectory .\artifacts\rollback-validation`。该检查会在发布替换完成后注入失败，并确认上一版目录和 ZIP 仍然存在。
+
 ```text
-src/PortHarbor/                 界面、连接、终端及数据存储
+src/PortHarbor.Domain/          无 UI 的会话、诊断、终端状态、Telnet 和文件传输契约
+src/PortHarbor.Application/     无 UI 的会话/配置/文件传输/终端/RDP/路径编排及应用端口
+src/PortHarbor.Infrastructure/  Windows 配置存储、凭据、FTP/SFTP 及 SSH/Telnet 适配器
+src/PortHarbor.Platform.Windows/ 能力检测、DPAPI、mstsc、串口、本地 Shell/ConPTY 及串口设备/选项提供器
+src/PortHarbor/                 界面、终端渲染及 Windows 组合入口
+tests/PortHarbor.Application.Checks/  跨平台会话、配置、文件传输及终端生命周期检查
+tests/Shared/                  两个检查项目共用的用例检查与脚本化适配器
 tests/PortHarbor.Checks/        分层检查入口和 Windows UI 检查
 tests/protocol_servers.py       仅监听本机的 FTP / SSH / SFTP 测试服务
 .github/workflows/              Windows CI 工作流
@@ -109,14 +119,16 @@ build.ps1                       构建和发布
 
 ## 验证
 
-最近一轮预览优化验证包含核心存储/终端/文件传输策略、主密码及旧配置迁移、Windows ConPTY 与生命周期，以及主窗口、协议编辑器、嵌套分类、图标、下拉菜单、等宽字体和标签鼠标关闭路径。逐次检查数量、失败修复过程和结果见 [开发日志](docs/DEVELOPMENT-LOG.md)。此前还完成过本机 FTP/SFTP/SSH/Telnet 协议回环检查；本次 UI 与密码库调整未重新运行协议服务。
+应用数据路径服务接入后，Application 检查 92 项、核心检查 217 项、Windows 检查 14 项、UI 检查 45 项及协议回环 26 项均通过，完整构建发布和发布 EXE 启动冒烟通过。逐次记录见 [开发日志](docs/DEVELOPMENT-LOG.md)。
 
-RDP 验证覆盖配置生成，不含真实远程桌面登录；串口尚无实体设备测试。FTPS、私钥登录和其他服务器实现也尚未完成实机互通测试。
+RDP 验证覆盖配置、启动失败、进程退出清理及界面重试，不含真实远程桌面登录；串口尚无实体设备测试。FTPS、私钥登录和其他服务器实现也尚未完成实机互通测试。
 
 快速核心检查、Windows 专属检查和 UI 冒烟可以分别运行：
 
 ```powershell
 dotnet run --project tests/PortHarbor.Checks -c Release -- --unit --results artifacts/unit-results.json
+dotnet run --project tests/PortHarbor.Checks -c Release -- --terminal --results artifacts/terminal-results.json
+dotnet run --project tests/PortHarbor.Application.Checks -c Release -- --results artifacts/application-results.json
 dotnet run --project tests/PortHarbor.Checks -c Release -- --windows --results artifacts/windows-results.json
 dotnet run --project tests/PortHarbor.Checks -c Release -- --ui "$env:TEMP\portharbor-ui.png"
 dotnet run --project tests/PortHarbor.Checks -c Release -- --ui-shell "$env:TEMP\portharbor-terminal.txt"
@@ -139,11 +151,12 @@ GitHub Actions 在 Windows Runner 上分别执行核心、Windows、协议和 UI
 ## 许可证
 
 PortHarbor 自有代码尚未采用开源许可证；获取仓库或预览构建不代表获得复制、修改或再分发项目代码的授权。第三方依赖仍按各自许可证提供，相关许可文本和声明见 `THIRD-PARTY-NOTICES.md` 与 `licenses/`。
-## Development Workbook
 
-Every development session is recorded in [`docs/DEVELOPMENT-LOG.md`](docs/DEVELOPMENT-LOG.md). Each entry includes the development scope, changed files, verification results, known problems, and the next step. Failed checks and environment limitations are recorded as well.
+## 文档
 
-文件传输接口、协议适配器、扩展方式及当前取消语义见 [文件传输接口与扩展约定](docs/FILE-TRANSFER.md)。
+GitHub 文档入口见 [`docs/README.md`](docs/README.md)。技术方案、开发日志、文件传输约定、终端会话约定和 ADR 均从该页面进入。
+
+开发日志 [`docs/DEVELOPMENT-LOG.md`](docs/DEVELOPMENT-LOG.md) 按时间倒序记录每轮开发、验证结果、已知边界和下一步；历史条目中的“下一步”不覆盖技术方案中的当前安排。
 
 
 

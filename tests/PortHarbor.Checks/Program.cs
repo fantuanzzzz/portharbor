@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using PortHarbor;
@@ -21,6 +21,8 @@ internal static partial class Program
 
     static int passed;
     static readonly List<string> results = [];
+    static IAppDataPaths TestPaths(string? directory = null, bool portable = false)
+        => new WindowsAppDataPaths(directory, portable);
     static void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); passed++; results.Add(name); Console.WriteLine("PASS: " + name); }
     [STAThread]
     static async Task<int> Main(string[] args)
@@ -32,17 +34,34 @@ internal static partial class Program
             if (args.Length > 0 && args[0] == "--ui") { await Ui(root, args[1]); return 0; }
             if (args.Length > 0 && args[0] == "--ui-shell") { UiShell.Run(root, args[1]); return 0; }
             string? configPath = Option(args, "--integration");
-            if (args.Contains("--unit"))
+            if (args.Contains("--terminal"))
+            {
+                Terminal(); Telnet();
+            }
+            else if (args.Contains("--unit"))
             {
                 Storage(root); VaultAndGroups(root); Terminal(); Telnet(); await FileDiagnostics(root); await FileTransferContract(root);
+                DiagnosticClassification(root); await TerminalDiagnostics(root);
+                SessionRepositoryCompatibility(root);
+                StorageAdapters(root);
+                await TerminalSessionChecks.RunAsync(Check);
+                await TerminalAdapters();
+                await WindowsPlatformAdapters();
+                RemoteDesktopChecks.Run(Check);
+                PlatformServiceBoundaries(root);
+                PlatformCapabilityChecks.Run(Check);
+                WindowsCapabilityDetection();
+                WindowsPathResolution(root);
             }
             else if (args.Contains("--windows"))
             {
-                await Shell(root); await Lifecycle(root);
+                await Shell(root); await Lifecycle(root); await ShellPlatformCancellation(root); await WindowsServices(root); WindowsCapabilityRuntime();
             }
             else if (configPath != null)
             {
                 await TelnetRoundTrip(root); await Integration(root, configPath); await SshRoundTrip(root, configPath);
+                await SshFailureDiagnostics(root, configPath);
+                await TerminalNetworkCancellation(root);
             }
             else
             {
@@ -80,7 +99,7 @@ internal static partial class Program
     static async Task Ui(string root, string output)
     {
         InitializeUi();
-        using var uiStore = new Store(Path.Combine(root,"ui"));
+        using var uiStore = new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root,"ui"), false));
         uiStore.AddGroup("空分类");
         uiStore.AddGroup("Work/Switches/Core");
         uiStore.PutSession(new Session { Name = "Nested terminal", Host = "nested-test-host", Group = "Work/Switches/Core" }, "");
@@ -103,6 +122,10 @@ internal static partial class Program
         TabMouseUi();
         FileTransferUi();
         FileTransferFormCloseUi();
+        DiagnosticUi(root);
+        TerminalCloseUi(root);
+        SerialProviderUi();
+        CapabilityUi(root);
     }
     static T FindControl<T>(Control parent) where T : Control
     {
@@ -117,7 +140,7 @@ internal static partial class Program
     {
         using var config=System.Text.Json.JsonDocument.Parse(File.ReadAllText(configPath));
         var s=new Session { Protocol=Protocol.SSH,Host="127.0.0.1",Port=config.RootElement.GetProperty("sftpPort").GetInt32(),Username="easytest" };
-        using var connection=new TerminalConnection(s,new Store(Path.Combine(root,"ssh-terminal")),"easytest-only",_=>true);
+        using var connection=TerminalConnectionFactory.Create(s,new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root,"ssh-terminal"), false)),"easytest-only",_=>true);
         var text=new StringBuilder(); var ready=new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously); var echoed=new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         connection.Output+=value=> { lock(text) { text.Append(value); if(text.ToString().Contains("SSH_TEST_READY")) ready.TrySetResult(true); if(text.ToString().Contains("ECHO:ordered-input")) echoed.TrySetResult(true); } };
         Task run=connection.Run(80,24); await ready.Task.WaitAsync(TimeSpan.FromSeconds(10)); connection.Send(Encoding.UTF8.GetBytes("ordered-input")); await echoed.Task.WaitAsync(TimeSpan.FromSeconds(10)); connection.Resize(100,30); connection.Dispose(); await run.WaitAsync(TimeSpan.FromSeconds(10));
@@ -125,12 +148,12 @@ internal static partial class Program
     }
     static void Storage(string root)
     {
-        var store = new Store(Path.Combine(root, "store")); var s = new Session { Name = "测试 Linux", Host = "127.0.0.1", SavePassword = true };
+        var store = new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root, "store"), false)); var s = new Session { Name = "测试 Linux", Host = "127.0.0.1", SavePassword = true };
         const string secret = "secret-中文-!@#$-123";
         store.SetMasterPassword("test-master-password");
         store.PutSession(s, secret);
         Check(!File.ReadAllText(store.FilePath).Contains(secret), "credentials are encrypted on disk");
-        var restarted = new Store(store.DirectoryPath);
+        var restarted = new Store(new WindowsSecretProtector(), TestPaths(store.DirectoryPath, false));
         restarted.UnlockVault("test-master-password");
         Check(restarted.GetPassword(s.Id) == secret && restarted.Data.Sessions.Single().Name == s.Name, "restart restores session and master-password protected DPAPI credential");
         restarted.PutSession(s with { Name = "Renamed", Group = "工作" }, secret);
@@ -145,7 +168,7 @@ internal static partial class Program
         restarted.Delete(s.Id); Check(!restarted.Data.Credentials.ContainsKey(s.Id.ToString()), "deleting session deletes credential");
         restarted.PutSession(s with { SavePassword = false }, secret); Check(restarted.GetPassword(s.Id) == "", "do not save policy removes persisted password");
         var badDir = Path.Combine(root, "invalid"); Directory.CreateDirectory(badDir); string corrupt = "{broken"; File.WriteAllText(Path.Combine(badDir, "settings.json"), corrupt);
-        bool refused = false; try { _ = new Store(badDir); } catch { refused = true; }
+        bool refused = false; try { _ = new Store(new WindowsSecretProtector(), TestPaths(badDir, false)); } catch { refused = true; }
         Check(refused && File.ReadAllText(Path.Combine(badDir, "settings.json")) == corrupt, "corrupt configuration is preserved and refused");
         var rdp = new Session { Protocol = Protocol.RDP, Host = "::1", Port = 3390, Username = "域\\用户" };
         string config = RdpLauncher.Configuration(rdp);
@@ -181,7 +204,7 @@ internal static partial class Program
         var server = new TcpListener(IPAddress.Loopback, 0); server.Start(); int port = ((IPEndPoint)server.LocalEndpoint).Port;
         var text = new StringBuilder(); var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var session = new Session { Protocol = Protocol.Telnet, Host = "127.0.0.1", Port = port };
-        using var connection = new TerminalConnection(session, new Store(Path.Combine(root,"telnet")), "", _=>false);
+        using var connection = TerminalConnectionFactory.Create(session, new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root,"telnet"), false)), "", _=>false);
         connection.Output += s => { lock (text) { text.Append(s); if (text.ToString().Contains("hello中文")) done.TrySetResult(true); } };
         Task run = connection.Run(80,24); using var peer = await server.AcceptTcpClientAsync(); var stream = peer.GetStream();
         await stream.WriteAsync(new byte[] {255,251}); await stream.WriteAsync(new byte[] {1});
@@ -197,7 +220,7 @@ internal static partial class Program
     static async Task Shell(string root)
     {
         var s = new Session { Protocol = Protocol.Shell, Executable = "cmd.exe", Arguments = "/Q", WorkingDirectory = root };
-        using var connection = new TerminalConnection(s, new Store(Path.Combine(root,"shell")), "", _=>false);
+        using var connection = TerminalConnectionFactory.Create(s, new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root,"shell"), false)), "", _=>false);
         var text = new StringBuilder(); var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         connection.Output += value => { lock(text) { text.Append(value); if (text.ToString().Contains("CONPTY_OK")) done.TrySetResult(true); } };
         var run = connection.Run(80,24);
@@ -220,7 +243,7 @@ internal static partial class Program
 
     static async Task Lifecycle(string root)
     {
-        using var connection = new TerminalConnection(new Session { Protocol = Protocol.Shell, Executable="no-such-portharbor-program.exe" },new Store(Path.Combine(root,"invalid-shell")),"",_=>false);
+        using var connection = TerminalConnectionFactory.Create(new Session { Protocol = Protocol.Shell, Executable="no-such-portharbor-program.exe" },new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root,"invalid-shell"), false)),"",_=>false);
         var diagnostics = new List<ConnectionDiagnostic>(); connection.Diagnostic += diagnostics.Add;
         bool failed=false; try { await connection.Run(80,24).WaitAsync(TimeSpan.FromSeconds(8)); } catch(System.ComponentModel.Win32Exception) { failed=true; }
         Check(failed,"invalid executable fails cleanly without leaked startup state");
@@ -232,7 +255,7 @@ internal static partial class Program
         foreach (var protocol in new[]{Protocol.FTP,Protocol.SFTP})
         {
             var s=new Session { Protocol=protocol, Host="127.0.0.1", Port=c.GetProperty(protocol.ToString().ToLowerInvariant()+"Port").GetInt32(), Username="easytest" };
-            var store=new Store(Path.Combine(root,protocol.ToString()));
+            var store=new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root,protocol.ToString()), false));
             await using IFileTransfer files=FileTransferFactory.Create(s,store,"easytest-only",_=>true);
             using var timeout = new CancellationTokenSource();
             await files.ConnectAsync(timeout.Token, TimeSpan.FromSeconds(15));

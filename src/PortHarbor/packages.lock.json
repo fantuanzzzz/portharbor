@@ -2,35 +2,15 @@
   "version": 1,
   "dependencies": {
     "net8.0-windows7.0": {
-      "FluentFTP": {
-        "type": "Direct",
-        "requested": "[55.1.0, )",
-        "resolved": "55.1.0",
-        "contentHash": "RXA6WEaziJiSt/lrOxbpxfkOyTY1YaeQiCKzsVoQQxEwcoI0dtoTzGiqS47mrqq3zBuETMwaVjI7FLTCcJC80w=="
-      },
-      "SSH.NET": {
-        "type": "Direct",
-        "requested": "[2026.0.0, )",
-        "resolved": "2026.0.0",
-        "contentHash": "Yu9dirPq8l3oaat0+OQ7K0nUf5MmYltpia5UGqsApTG4zTPvBC1cxbNnC3NERij26dUST0A3Ef1QdHSn5ArbWQ==",
-        "dependencies": {
-          "BouncyCastle.Cryptography": "2.7.0",
-          "Microsoft.Extensions.Logging.Abstractions": "8.0.3"
-        }
-      },
-      "System.IO.Ports": {
-        "type": "Direct",
-        "requested": "[8.0.0, )",
-        "resolved": "8.0.0",
-        "contentHash": "MaiPbx2/QXZc62gm/DrajRrGPG1lU4m08GWMoWiymPYM+ba4kfACp2PbiYpqJ4QiFGhHD00zX3RoVDTucjWe9g==",
-        "dependencies": {
-          "runtime.native.System.IO.Ports": "8.0.0"
-        }
-      },
       "BouncyCastle.Cryptography": {
         "type": "Transitive",
         "resolved": "2.7.0",
         "contentHash": "U+12df8UEWHgBi04YVf/Lgi2dy3SItlIYvHjjEVa/BngCQIzDCDRBk50DDByCfDvSbe5pRNFr3b7UrVK2kMcLw=="
+      },
+      "FluentFTP": {
+        "type": "Transitive",
+        "resolved": "55.1.0",
+        "contentHash": "RXA6WEaziJiSt/lrOxbpxfkOyTY1YaeQiCKzsVoQQxEwcoI0dtoTzGiqS47mrqq3zBuETMwaVjI7FLTCcJC80w=="
       },
       "Microsoft.Extensions.DependencyInjection.Abstractions": {
         "type": "Transitive",
@@ -81,18 +61,50 @@
         "type": "Transitive",
         "resolved": "8.0.0",
         "contentHash": "IcfB4jKtM9pkzP9OpYelEcUX1MiDt0IJPBh3XYYdEISFF+6Mc+T8WWi0dr9wVh1gtcdVjubVEIBgB8BHESlGfQ=="
-      }
-    },
-    "net8.0-windows7.0/win-x64": {
+      },
+      "SSH.NET": {
+        "type": "Transitive",
+        "resolved": "2026.0.0",
+        "contentHash": "Yu9dirPq8l3oaat0+OQ7K0nUf5MmYltpia5UGqsApTG4zTPvBC1cxbNnC3NERij26dUST0A3Ef1QdHSn5ArbWQ==",
+        "dependencies": {
+          "BouncyCastle.Cryptography": "2.7.0",
+          "Microsoft.Extensions.Logging.Abstractions": "8.0.3"
+        }
+      },
       "System.IO.Ports": {
-        "type": "Direct",
-        "requested": "[8.0.0, )",
+        "type": "Transitive",
         "resolved": "8.0.0",
         "contentHash": "MaiPbx2/QXZc62gm/DrajRrGPG1lU4m08GWMoWiymPYM+ba4kfACp2PbiYpqJ4QiFGhHD00zX3RoVDTucjWe9g==",
         "dependencies": {
           "runtime.native.System.IO.Ports": "8.0.0"
         }
       },
+      "portharbor.application": {
+        "type": "Project",
+        "dependencies": {
+          "PortHarbor.Domain": "[1.0.0, )"
+        }
+      },
+      "portharbor.domain": {
+        "type": "Project"
+      },
+      "portharbor.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "FluentFTP": "[55.1.0, )",
+          "PortHarbor.Application": "[1.0.0, )",
+          "SSH.NET": "[2026.0.0, )"
+        }
+      },
+      "portharbor.platform.windows": {
+        "type": "Project",
+        "dependencies": {
+          "PortHarbor.Application": "[1.0.0, )",
+          "System.IO.Ports": "[8.0.0, )"
+        }
+      }
+    },
+    "net8.0-windows7.0/win-x64": {
       "runtime.linux-arm.runtime.native.System.IO.Ports": {
         "type": "Transitive",
         "resolved": "8.0.0",
@@ -117,6 +129,14 @@
         "type": "Transitive",
         "resolved": "8.0.0",
         "contentHash": "IcfB4jKtM9pkzP9OpYelEcUX1MiDt0IJPBh3XYYdEISFF+6Mc+T8WWi0dr9wVh1gtcdVjubVEIBgB8BHESlGfQ=="
+      },
+      "System.IO.Ports": {
+        "type": "Transitive",
+        "resolved": "8.0.0",
+        "contentHash": "MaiPbx2/QXZc62gm/DrajRrGPG1lU4m08GWMoWiymPYM+ba4kfACp2PbiYpqJ4QiFGhHD00zX3RoVDTucjWe9g==",
+        "dependencies": {
+          "runtime.native.System.IO.Ports": "8.0.0"
+        }
       }
     }
   }

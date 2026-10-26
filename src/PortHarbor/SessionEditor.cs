@@ -1,6 +1,4 @@
-﻿using System.IO.Ports;
-
-namespace PortHarbor;
+﻿namespace PortHarbor;
 
 public sealed class SessionEditor : Form
 {
@@ -16,9 +14,16 @@ public sealed class SessionEditor : Form
     readonly TextBox password = new() { UseSystemPasswordChar = true };
     readonly CheckBox savePassword = new() { Text = "保存密码（主密码 + Windows 用户加密）", AutoSize = true };
     readonly CheckBox persist = new() { Text = "保存此会话", Checked = true, AutoSize = true };
-    public SessionEditor(Session? session = null, string secret = "", IEnumerable<string>? groups = null)
+    readonly PlatformConnectionPolicy platform;
+    readonly Label availability = new() { Name = "PlatformAvailability", AutoSize = true, MaximumSize = new Size(420, 0), ForeColor = Color.DarkRed };
+    readonly Label serialNotice = new() { Name = "SerialNotice", AutoSize = true, MaximumSize = new Size(420, 0), ForeColor = Color.DimGray };
+    readonly Button connect = new() { Text = "保存并连接", AutoSize = true, BackColor = Color.FromArgb(37, 99, 235), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+    public SessionEditor(Session? session = null, string secret = "", IEnumerable<string>? groups = null, ISerialPortProvider? serialPorts = null,
+        IPlatformCapabilities? capabilities = null)
     {
         original = session ?? new(); Result = original with { };
+        serialPorts ??= new WindowsSerialPortProvider();
+        platform = new PlatformConnectionPolicy(capabilities ?? new WindowsPlatformCapabilities());
         Text = session == null ? "新建连接" : "编辑会话";
         Font = new Font("Microsoft YaHei UI", 9); AutoScaleMode = AutoScaleMode.Dpi;
         Size = new Size(650, 770); MinimumSize = new Size(570, 500); StartPosition = FormStartPosition.CenterParent;
@@ -30,15 +35,25 @@ public sealed class SessionEditor : Form
         group.Items.AddRange((groups ?? []).Append("默认").Append(original.Group).Where(g => !string.IsNullOrWhiteSpace(g)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(g => g).Cast<object>().ToArray());
         group.Text = original.Group; Add("Group", "分类", group);
         protocol.Items.AddRange(Enum.GetNames<Protocol>()); protocol.SelectedItem = original.Protocol.ToString(); Add("Protocol", "连接类型", protocol);
+        Add("PlatformAvailability", "", availability);
         AddText("Host", "主机 / IP", original.Host); AddNumber("Port", "端口", original.Port, 1, 65535);
         AddText("Username", "用户名 / 域\\用户名", original.Username);
         password.Text = secret; Add("Password", "密码 / 私钥口令", password); savePassword.Checked = original.SavePassword; Add("SavePassword", "", savePassword);
         AddText("PrivateKey", "SSH 私钥路径（可选）", original.PrivateKey);
         AddText("RemotePath", "初始远程目录", original.RemotePath);
         AddCheck("UseTls", "FTP 显式 TLS", original.UseTls);
-        var ports = new ComboBox { Width = 320 }; ports.Items.AddRange(SerialPort.GetPortNames()); ports.Text = original.SerialPort; Add("SerialPort", "串口", ports);
+        var ports = new ComboBox { Width = 320 };
+        try
+        {
+            var names = serialPorts.GetPortNames(); ports.Items.AddRange(names.Cast<object>().ToArray());
+            if (names.Count == 0) serialNotice.Text = "未检测到串口，可连接设备后重新打开此窗口，或手动输入端口名称。";
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Security.SecurityException
+            or System.ComponentModel.Win32Exception or PlatformNotSupportedException)
+        { serialNotice.Text = "无法读取串口列表，请检查设备或权限；仍可手动输入端口名称。"; }
+        ports.Text = original.SerialPort; Add("SerialPort", "串口", ports); Add("SerialNotice", "", serialNotice);
         AddNumber("BaudRate", "波特率", original.BaudRate, 1, 4000000); AddNumber("DataBits", "数据位", original.DataBits, 5, 8);
-        AddChoice("Parity", "校验", Enum.GetNames<Parity>(), original.Parity); AddChoice("StopBits", "停止位", ["One", "OnePointFive", "Two"], original.StopBits); AddChoice("Handshake", "流控", Enum.GetNames<Handshake>(), original.Handshake);
+        AddChoice("Parity", "校验", serialPorts.ParityOptions.ToArray(), original.Parity); AddChoice("StopBits", "停止位", serialPorts.StopBitOptions.ToArray(), original.StopBits); AddChoice("Handshake", "流控", serialPorts.HandshakeOptions.ToArray(), original.Handshake);
         AddText("Executable", "Shell 程序", original.Executable); AddText("Arguments", "启动参数", original.Arguments); AddText("WorkingDirectory", "工作目录（可选）", original.WorkingDirectory);
         AddCheck("RdpFullScreen", "RDP 全屏", original.RdpFullScreen); AddCheck("Clipboard", "RDP 剪贴板共享", original.Clipboard);
         Add("Persist", "", persist);
@@ -46,13 +61,13 @@ public sealed class SessionEditor : Form
         Add("Note", "", note);
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 56, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(10) };
         var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, AutoSize = true };
-        var connect = new Button { Text = "保存并连接", AutoSize = true, BackColor = Color.FromArgb(37, 99, 235), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
         var save = new Button { Text = "仅保存", AutoSize = true };
         connect.Click += (_, _) => Finish(true); save.Click += (_, _) => { persist.Checked = true; Finish(false); };
         persist.CheckedChanged += (_, _) => connect.Text = persist.Checked ? "保存并连接" : "连接";
         buttons.Controls.AddRange([cancel, connect, save]); AcceptButton = connect; CancelButton = cancel;
         Controls.Add(scroll); Controls.Add(buttons);
         protocol.SelectedIndexChanged += (_, _) => { ((NumericUpDown)inputs["Port"]).Value = Session.DefaultPort(SelectedProtocol); UpdateFields(); };
+        Activated += (_, _) => UpdateAvailability();
         UpdateFields();
     }
     Protocol SelectedProtocol => Enum.Parse<Protocol>(protocol.Text);
@@ -78,15 +93,25 @@ public sealed class SessionEditor : Form
                 "PrivateKey" => p is Protocol.SSH or Protocol.SFTP,
                 "RemotePath" => p is Protocol.FTP or Protocol.SFTP,
                 "UseTls" => p == Protocol.FTP,
-                "SerialPort" or "BaudRate" or "DataBits" or "Parity" or "StopBits" or "Handshake" => p == Protocol.Serial,
+                "SerialPort" or "SerialNotice" or "BaudRate" or "DataBits" or "Parity" or "StopBits" or "Handshake" => p == Protocol.Serial,
                 "Executable" or "Arguments" or "WorkingDirectory" => p == Protocol.Shell,
                 "RdpFullScreen" or "Clipboard" => p == Protocol.RDP,
                 _ => true };
             pair.label.Visible = pair.field.Visible = visible;
         }
+        UpdateAvailability();
+    }
+    void UpdateAvailability()
+    {
+        var state = platform.GetAvailability(SelectedProtocol);
+        connect.Enabled = state.IsAvailable;
+        availability.Text = state.IsAvailable ? "" : PlatformCapabilityPresenter.ForProtocol(SelectedProtocol, state) + " 仍可仅保存会话。";
+        rows["PlatformAvailability"].label.Visible = availability.Visible = !state.IsAvailable;
     }
     void Finish(bool connect)
     {
+        UpdateAvailability();
+        if (connect && !this.connect.Enabled) return;
         string S(string key) => inputs[key].Text.Trim(); int N(string key) => (int)((NumericUpDown)inputs[key]).Value; bool B(string key) => ((CheckBox)inputs[key]).Checked;
         try
         {

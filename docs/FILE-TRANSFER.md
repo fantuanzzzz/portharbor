@@ -13,10 +13,11 @@ flowchart TD
     SFTP[SftpRemoteFileSystem / SSH.NET] -. 实现 .-> FS
 ```
 
-- `IFileTransfer` 与 `RemoteEntry` 是界面使用的协议无关契约，包含连接状态、诊断事件、目录操作、上传和下载。
-- `FileTransferFactory` 是当前应用的构造入口。`FileView` 还接受注入的 `IFileTransfer`，并负责其释放。
-- `FileConnection` 管理诊断、连接状态、进度累计、取消检查、临时文件和提交流程。它不引用 FluentFTP 或 SSH.NET。
-- 内部 `IRemoteFileSystem` 隔离厂商客户端。FTP 与 SFTP 各自处理连接、列表映射、文件流、覆盖提交和协议资源释放。
+- Domain 中的 `IFileTransfer`、`IRemoteFileSystem`、`RemoteEntry` 和 `TransferProgress` 是公开的协议无关契约，包含连接状态、诊断事件、目录操作、上传和下载。
+- Infrastructure 中的 `FileTransferFactory` 是当前应用的构造入口，装配协议适配器与 Application 用例。`FileView` 还接受注入的 `IFileTransfer`，并负责其释放。
+- Application 中的 `FileConnection` 管理诊断、连接状态、进度累计、取消检查、临时文件和提交流程，目标为 `net8.0`，只依赖 Domain。其构造参数为协议、`IRemoteFileSystem` 和可选错误分类回调；默认 `ConnectionErrorPolicy` 只处理框架异常。
+- Infrastructure 中的 FTP/SFTP 适配器实现 `IRemoteFileSystem`，各自处理连接、列表映射、文件流、覆盖提交和协议资源释放。工厂注入包含 SSH.NET 异常识别的 `DiagnosticClassifier`，共享 SSH 认证与主机密钥配置由 `SshClientSupport` 提供；适配器不依赖 UI 中的终端类。
+- Infrastructure 当前仍包含 DPAPI，目标为 `net8.0-windows`；传输用例可脱离 Windows 构建和检查，本次未将整个协议适配项目迁为跨平台目标。
 - 工厂显式支持 FTP/SFTP；其他协议会被拒绝，避免把错误配置当成 FTP 连接。
 
 ## 契约与资源约定
@@ -37,8 +38,8 @@ flowchart TD
 - 在 `RemoteFileSystemFactory` 中显式注册协议；同时补齐会话配置与校验。共享流程不增加按协议判断的分支。
 - 不能满足当前语义的协议需先设计能力契约，例如对象存储的目录和重命名语义，不应伪造文件系统能力。
 - 补充适配器的本机协议检查，至少覆盖 Unicode 路径、上传下载、覆盖、取消清理、目标冲突和目录删除。
-- 公共策略通过内存适配器检查，可不启动服务器。测试程序集通过 `InternalsVisibleTo` 使用内部测试接缝；产品接口不暴露厂商客户端。
+- 公共策略通过公开的用例构造函数注入内存适配器检查，可不启动服务器。Windows 检查通过 `InternalsVisibleTo` 核验内部适配器选择；产品传输接口不暴露厂商客户端。
 
 ## 验证入口
 
-`tests/PortHarbor.Checks/FileTransferChecks.cs` 验证公共策略、取消、失败清理、状态与诊断；`Program.cs` 的协议集成入口通过工厂获得 `IFileTransfer`，执行真实本机 FTP/SFTP 操作。运行方式见 README 的“验证”。
+`tests/Shared/FileTransferPolicyChecks.cs` 与内存适配器由两个检查项目共用，验证公共策略、取消、超时、失败清理、状态与诊断。`PortHarbor.Application.Checks` 仅引用 Application，可独立验证这些用例；`PortHarbor.Checks/FileTransferChecks.cs` 另行核验工厂和 WinForms 接线。后者 `Program.cs` 的协议集成入口通过工厂获得 `IFileTransfer`，执行真实本机 FTP/SFTP 操作。运行方式见 README 的“验证”。
