@@ -67,6 +67,7 @@ internal static partial class Program
                 await SshFailureDiagnostics(root, configPath);
                 await TerminalNetworkCancellation(root);
                 await TerminalNetworkFailures(root, configPath);
+                await FileTransferInterruptions(root, configPath);
             }
             else
             {

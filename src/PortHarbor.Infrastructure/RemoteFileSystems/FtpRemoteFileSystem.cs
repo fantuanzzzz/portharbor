@@ -41,6 +41,12 @@ internal sealed class FtpRemoteFileSystem(Session session, string password) : IR
     public Task<Stream> OpenReadAsync(string path, CancellationToken token)
         => Client.OpenRead(path, token: token);
 
+    public async Task CompleteReadAsync(CancellationToken token)
+    {
+        var reply = await Client.GetReply(token).ConfigureAwait(false);
+        if (!reply.Success) throw new IOException("FTP server did not confirm download completion.");
+    }
+
     public Task<Stream> OpenWriteAsync(string path, CancellationToken token)
         => Client.OpenWrite(path, checkIfFileExists: false, token: token);
 

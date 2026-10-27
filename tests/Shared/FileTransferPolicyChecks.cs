@@ -11,6 +11,54 @@ internal static class FileTransferPolicyChecks
             "transfer policy lives in Application without UI, infrastructure or vendor dependencies");
         foreach (var protocol in new[] { Protocol.FTP, Protocol.SFTP })
         {
+            var truncated = new MemoryRemoteFileSystem { ReportedLength = 100 };
+            truncated.Files["/truncated.bin"] = [1, 2, 3];
+            await using (var downloadCheck = new FileConnection(protocol, truncated))
+            {
+                await downloadCheck.ConnectAsync(CancellationToken.None, TimeSpan.FromSeconds(1));
+                string destination = Path.Combine(root, "truncated-" + protocol + ".bin");
+                File.WriteAllText(destination, "existing local content");
+                await CheckThrowsAsync<EndOfStreamException>(() => downloadCheck.DownloadAsync("/truncated.bin", destination, CancellationToken.None, TimeSpan.FromSeconds(1)));
+                Check(File.ReadAllText(destination) == "existing local content" && !Directory.EnumerateFiles(root, "*.part").Any(),
+                    protocol + " premature download EOF preserves the local target and removes its temporary file");
+                File.Delete(destination);
+                await CheckThrowsAsync<EndOfStreamException>(() => downloadCheck.DownloadAsync("/truncated.bin", destination, CancellationToken.None, TimeSpan.FromSeconds(1)));
+                Check(!File.Exists(destination) && !Directory.EnumerateFiles(root, "*.part").Any(),
+                    protocol + " premature download EOF never publishes a new incomplete target");
+                truncated.ReportedLength = 2;
+                File.WriteAllText(destination, "existing local content");
+                await CheckThrowsAsync<IOException>(() => downloadCheck.DownloadAsync("/truncated.bin", destination, CancellationToken.None, TimeSpan.FromSeconds(1)));
+                Check(File.ReadAllText(destination) == "existing local content" && truncated.CompleteReadCalls == 0,
+                    protocol + " unexpected extra download bytes cannot replace the local target");
+            }
+            var completion = new MemoryRemoteFileSystem { CompleteReadError = new IOException("private completion failure"), UnknownLength = true };
+            completion.Files["/data.bin"] = [1, 2, 3];
+            await using (var downloadCheck = new FileConnection(protocol, completion))
+            {
+                await downloadCheck.ConnectAsync(CancellationToken.None, TimeSpan.FromSeconds(1));
+                string destination = Path.Combine(root, "completion-" + protocol + ".bin");
+                File.WriteAllText(destination, "previous target");
+                Exception? error = null;
+                try { await downloadCheck.DownloadAsync("/data.bin", destination, CancellationToken.None, TimeSpan.FromSeconds(1)); }
+                catch (IOException observed) { error = observed; }
+                Check(ReferenceEquals(error, completion.CompleteReadError) && File.ReadAllText(destination) == "previous target"
+                    && !completion.ReadOpen && !Directory.EnumerateFiles(root, "*.part").Any(),
+                    protocol + " failed download confirmation preserves the target even when length is unknown");
+                completion.CompleteReadError = null;
+                await downloadCheck.DownloadAsync("/data.bin", destination, CancellationToken.None, TimeSpan.FromSeconds(1));
+                Check(File.ReadAllBytes(destination).SequenceEqual(completion.Files["/data.bin"]) && completion.CompleteReadCalls == 2,
+                    protocol + " unknown length downloads commit after closed-stream protocol confirmation");
+                File.WriteAllText(destination, "previous target");
+                completion.BlockReadCompletion = true;
+                var downloadTask = downloadCheck.DownloadAsync("/data.bin", destination, CancellationToken.None, TimeSpan.FromSeconds(5));
+                await completion.ReadCompletionBlocked.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                var closeTask = downloadCheck.DisposeAsync().AsTask();
+                await CheckThrowsAsync<OperationCanceledException>(() => downloadTask);
+                await closeTask.WaitAsync(TimeSpan.FromSeconds(2));
+                Check(completion.ReadCompletionCancelled && completion.DisposeCalls == 1 && File.ReadAllText(destination) == "previous target"
+                    && !Directory.EnumerateFiles(root, "*.part").Any(),
+                    protocol + " close cancels pending download confirmation before committing and cleans local staging");
+            }
             var backend = new MemoryRemoteFileSystem();
             await using IFileTransfer transfer = new FileConnection(protocol, backend);
             var diagnostics = new List<ConnectionDiagnostic>(); transfer.Diagnostic += diagnostics.Add;
@@ -37,7 +85,8 @@ internal static class FileTransferPolicyChecks
             Check(progress.Count > 1 && progress[^1].BytesTransferred == content.Length && progress.All(p => p.Direction == TransferDirection.Upload && p.TotalBytes == content.Length)
                 && progress.Zip(progress.Skip(1)).All(p => p.First.BytesTransferred < p.Second.BytesTransferred), protocol + " reports structured cumulative upload progress");
             await transfer.DownloadAsync("/data.bin", download, CancellationToken.None, TimeSpan.FromSeconds(5));
-            Check(File.ReadAllBytes(download).SequenceEqual(content) && backend.OpenReads == 1, protocol + " downloads bytes through async shared transfer policy");
+            Check(File.ReadAllBytes(download).SequenceEqual(content) && backend.OpenReads == 1 && backend.CompleteReadCalls == 1 && !backend.ReadOpen,
+                protocol + " downloads bytes through async shared transfer policy after closed-stream confirmation");
 
             using var cancelUpload = new CancellationTokenSource();
             await CheckThrowsAsync<OperationCanceledException>(() => transfer.UploadAsync(local, "/data.bin", cancelUpload.Token, TimeSpan.FromSeconds(5),

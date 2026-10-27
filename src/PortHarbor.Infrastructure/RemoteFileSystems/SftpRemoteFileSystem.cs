@@ -38,6 +38,8 @@ internal sealed class SftpRemoteFileSystem(Session session, IHostKeyTrust hostKe
     public async Task<Stream> OpenReadAsync(string path, CancellationToken token)
         => await Client.OpenAsync(path, FileMode.Open, FileAccess.Read, token).ConfigureAwait(false);
 
+    public Task CompleteReadAsync(CancellationToken token) { token.ThrowIfCancellationRequested(); return Task.CompletedTask; }
+
     public async Task<Stream> OpenWriteAsync(string path, CancellationToken token)
         => await Client.OpenAsync(path, FileMode.Create, FileAccess.Write, token).ConfigureAwait(false);
 

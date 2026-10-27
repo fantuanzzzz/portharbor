@@ -227,7 +227,8 @@ tests/
 - [x] 增加连接失败/关闭诊断、安全展示脱敏、文件传输取消清理与目标冲突检查。
 - [x] 增加终端启动中取消、晚启动返回、阻塞写入关闭竞态，以及真实 SSH 握手/Telnet 读取阻塞取消检查。
 - [x] 补齐 SSH/Telnet/FTP/SFTP 拒绝连接、FTP 错误密码、SSH 连接丢失与正常 Shell 退出、Telnet reset 与正常 EOF 的本机协议检查；修复 SSH 掉线后阻塞读取和 FTP 错误连接阶段，保留关闭清理与安全提示。
-- [ ] 补齐实际主机解析失败、静默断网、传输中断线、串口阻塞及其他进程退出等覆盖；当前 HostNotFound 分类检查不代表真实 DNS 验收。
+- [x] 补齐 FTP/SFTP 数据复制阶段断线的旧目标保护、下载暂存清理、原阶段诊断及关闭期限检查；下载增加已知长度和最终协议确认门禁，FTP 最终拒绝确认不得覆盖旧文件，确认等待中关闭可取消。
+- [ ] 补齐覆盖提交/备份恢复期间断线、实际主机解析失败、静默断网、串口阻塞及其他进程退出等覆盖；当前 HostNotFound 分类检查不代表真实 DNS 验收。
 
 依据：[`DiagnosticClassifier.cs`](../src/PortHarbor.Infrastructure/DiagnosticClassifier.cs)、[`DiagnosticPresenter.cs`](../src/PortHarbor.Application/DiagnosticPresenter.cs)、[`消息目录`](../src/PortHarbor.Application/DiagnosticMessageCatalog.cs)、[`资源`](../src/PortHarbor.Application/Resources/DiagnosticMessages.resx)、[`ConnectionStatusLabel.cs`](../src/PortHarbor/ConnectionStatusLabel.cs)、[诊断消息约定](DIAGNOSTICS.md)、[ADR 0008](adr/0008-diagnostic-message-catalog.md)、终端/RDP/文件连接实现及[开发日志](DEVELOPMENT-LOG.md)。目录回归报告位于 ignored `artifacts/diagnostic-messages/`；其余未勾选任务仍需单独验收。
 
@@ -328,7 +329,7 @@ tests/
 
 以下安排对应第 8 节任务清单，不代表新增验收项：
 
-1. 继续补齐阶段 1 的文件传输中断线、实际主机解析失败及静默断网等故障场景；拒绝连接和 SSH/Telnet 终端连接中断已纳入协议回环。更多语言资源实施前另行补入阶段 1 清单，按实际需求验收。
+1. 继续补齐阶段 1 的 SFTP 覆盖提交/备份恢复期间断线、实际主机解析失败及静默断网等故障场景；拒绝连接、SSH/Telnet 终端中断、FTP/SFTP 数据复制阶段中断与 FTP 下载最终确认已纳入协议回环。更多语言资源实施前另行补入阶段 1 清单，按实际需求验收。
 2. 真实串口设备、真实 RDP 登录、FTPS、私钥登录及生产服务器兼容性仍需对应环境验收；本机干净克隆通过不替代这些专项结果。
 3. 补齐阶段 0 尚未验收的发布故障注入和回滚范围，具体缺口见第 8 节；原 Temp 克隆 FTP 550 如再次出现，使用保留的 fixture 日志继续定位。
 4. 继续按阶段 2、3 完善其余应用端口，保持 Windows 行为及用户数据兼容。

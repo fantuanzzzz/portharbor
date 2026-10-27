@@ -124,7 +124,9 @@ build.ps1                       构建和发布
 
 ## 验证
 
-最近一轮修复 SSH 突然掉线后的阻塞读取及 FTP 连接失败阶段；当前工作区完整扩展基线通过 Application 151、核心 324、Windows 14、协议 37、UI 57 项，共 583 项检查，另有四项冒烟通过。报告为 ignored `artifacts/network-failures/release/engineering-baseline.json`。新增用例区分正常退出、主动取消、拒绝连接、连接重置与错误密码，不引入自动重连。下一步验证文件上传/下载中途断线的目标保留和清理。
+最新一轮补齐 FTP/SFTP 传输中途断线，并修复提前 EOF 或 FTP 最终完成响应失败仍可能覆盖下载目标的问题。工作区完整扩展基线通过 Application 163、核心 336、Windows 14、协议 57、UI 57 项，共 627 项检查，另有四项冒烟通过。报告位于 ignored `artifacts/transfer-interruption/release/`。失联后上传残片可能无法即时删除，下一步验证 SFTP 覆盖提交窗口的备份恢复。
+
+上一轮 SSH 掉线及 FTP 连接失败诊断的完整结果为 583 项，报告为 ignored `artifacts/network-failures/release/engineering-baseline.json`。这些正常退出、主动取消、拒绝连接、连接重置与错误密码场景均在本轮继续回归，不引入自动重连。
 
 2026-10-27 对提交 `e110c4e`（`v1.0.5`）进行了 Windows 本机独立干净克隆验收，没有复制原目录的构建产物或依赖缓存。锁定恢复和 Release 编译通过（0 警告、0 错误）；Application 151、核心 320、Windows 14、协议回环 26、UI 57 项检查全部通过，共 568 项。ConPTY、安装隔离目录、默认便携首次启动及重启四项冒烟也通过。原始结果位于 ignored `artifacts/clean-checkout-acceptance-20261027/artifacts/baseline/`；该数字为检查计数，不是源码覆盖率。
 

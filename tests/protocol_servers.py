@@ -2,7 +2,7 @@
 import argparse, json, os, pathlib, socket, threading, time
 import paramiko
 from pyftpdlib.authorizers import DummyAuthorizer
-from pyftpdlib.handlers import FTPHandler
+from pyftpdlib.handlers import FTPHandler, DTPHandler
 from pyftpdlib.servers import FTPServer
 
 parser=argparse.ArgumentParser()
@@ -31,7 +31,24 @@ class Auth(paramiko.ServerInterface):
                     channel.send(b'ECHO:'+data)
             except Exception: pass
         threading.Thread(target=shell,daemon=True).start(); return True
+class FaultHandle(paramiko.SFTPHandle):
+    def __init__(self,flags,transport,name):
+        super().__init__(flags); self.transport=transport; self.name=name
+    def drop(self):
+        (sftp_root/'faults'/('upload.dropped' if self.name.startswith('drop-upload') else 'download.dropped')).write_text('65536')
+        self.transport.sock.shutdown(socket.SHUT_RDWR); self.transport.close()
+        return paramiko.SFTP_FAILURE
+    def read(self,offset,length):
+        if self.name=='drop-download.bin':
+            if offset>=65536: return self.drop()
+            length=min(length,65536-offset)
+        return super().read(offset,length)
+    def write(self,offset,data):
+        if self.name.startswith('drop-upload.bin.portharbor-') and offset>=65536: return self.drop()
+        return super().write(offset,data)
 class Sftp(paramiko.SFTPServerInterface):
+    def __init__(self,server,*args,**kwargs):
+        super().__init__(server,*args,**kwargs); self.transport=server.transport
     def path(self,path):
         result=(sftp_root/path.lstrip('/')).resolve()
         if not result.is_relative_to(sftp_root): raise PermissionError('outside fixture')
@@ -51,7 +68,7 @@ class Sftp(paramiko.SFTPServerInterface):
         try:
             fd=os.open(self.path(path),flags,0o600)
             mode='r+b' if flags & os.O_RDWR else 'wb' if flags & os.O_WRONLY else 'rb'
-            f=os.fdopen(fd,mode); handle=paramiko.SFTPHandle(flags); handle.readfile=handle.writefile=f; return handle
+            f=os.fdopen(fd,mode); handle=FaultHandle(flags,self.transport,pathlib.PurePosixPath(path).name); handle.readfile=handle.writefile=f; return handle
         except OSError as e: return paramiko.SFTPServer.convert_errno(e.errno)
     def mkdir(self,path,attr):
         try: self.path(path).mkdir(); return paramiko.SFTP_OK
@@ -75,14 +92,43 @@ def accept_ssh():
         client,_=ssh.accept()
         def serve(client=client):
             try:
-                transport=paramiko.Transport(client); transport.add_server_key(key); transport.set_subsystem_handler('sftp',paramiko.SFTPServer,Sftp); transport.start_server(server=Auth())
+                transport=paramiko.Transport(client); transport.add_server_key(key); transport.set_subsystem_handler('sftp',paramiko.SFTPServer,Sftp)
+                auth=Auth(); auth.transport=transport; transport.start_server(server=auth)
                 while transport.is_active(): time.sleep(.1)
             except Exception as e: print(type(e).__name__,str(e),flush=True)
         threading.Thread(target=serve,daemon=True).start()
 threading.Thread(target=accept_ssh,daemon=True).start()
+class FaultDtp(DTPHandler):
+    drop_scheduled=False
+    def drop(self,direction):
+        if not self.drop_scheduled:
+            self.drop_scheduled=True
+            (ftp_root/'faults'/(direction+'.dropped')).write_text('65536')
+            # Defer to the I/O loop: FTPHandler can still be installing this data
+            # channel while send() first runs, so closing it inline corrupts setup.
+            self.cmd_channel.ioloop.call_later(0,self.cmd_channel.close)
+    def handle_read(self):
+        super().handle_read()
+        if self.file_obj and pathlib.Path(self.file_obj.name).name.startswith('drop-upload.bin.portharbor-') and self.tot_bytes_received>=65536:
+            self.drop('upload')
+    handle_read_event=handle_read
+    def send(self,data):
+        dropping=self.file_obj and pathlib.Path(self.file_obj.name).name=='drop-download.bin'
+        if dropping: data=data[:max(0,65536-self.tot_bytes_sent)]
+        count=super().send(data)
+        if dropping and self.tot_bytes_sent>=65536: self.drop('download')
+        return count
+    def close(self):
+        if not self._closed and self.file_obj and pathlib.Path(self.file_obj.name).name=='reject-download.bin' and self.transfer_finished:
+            self._resp=('426 Test fixture rejected final download confirmation.',self.cmd_channel.log)
+            (ftp_root/'faults'/'confirmation.rejected').write_text(str(self.tot_bytes_sent))
+        super().close()
+class FaultFtp(FTPHandler):
+    dtp_handler=FaultDtp
+    use_sendfile=False
 auth=DummyAuthorizer(); auth.add_user('easytest','easytest-only',str(ftp_root),perm='elradfmwMT')
-FTPHandler.authorizer=auth
-server=FTPServer(('127.0.0.1',0),FTPHandler)
+FaultFtp.authorizer=auth
+server=FTPServer(('127.0.0.1',0),FaultFtp)
 (root/'servers.json').write_text(json.dumps({'ftpPort':server.socket.getsockname()[1],'sftpPort':ssh.getsockname()[1]}))
 print('READY '+str(root/'servers.json'),flush=True)
 server.serve_forever()

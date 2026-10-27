@@ -33,6 +33,8 @@ public interface IRemoteFileSystem : IAsyncDisposable
     Task<bool> ExistsAsync(string path, CancellationToken token);
     Task<long?> GetLengthAsync(string path, CancellationToken token);
     Task<Stream> OpenReadAsync(string path, CancellationToken token);
+    /// <summary>Called after closing the read stream, before committing a local download.</summary>
+    Task CompleteReadAsync(CancellationToken token);
     Task<Stream> OpenWriteAsync(string path, CancellationToken token);
     Task CompleteWriteAsync(CancellationToken token);
     Task CommitUploadAsync(string temporaryPath, string destination, CancellationToken token);

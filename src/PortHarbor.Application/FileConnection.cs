@@ -115,8 +115,20 @@ public sealed class FileConnection : IFileTransfer
         => ExecuteAsync(ConnectionStage.Reading, "Download failed.", timeout, token, async ct =>
         {
             var total = await remote.GetLengthAsync(remotePath, ct).ConfigureAwait(false);
-            await using var source = await remote.OpenReadAsync(remotePath, ct).ConfigureAwait(false);
-            await CopyAtomicallyAsync(source, local, TransferDirection.Download, total, ct, progress).ConfigureAwait(false);
+            string temporaryPath = local + ".portharbor-" + Guid.NewGuid().ToString("N") + ".part";
+            try
+            {
+                await using (var target = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan))
+                await using (var source = await remote.OpenReadAsync(remotePath, ct).ConfigureAwait(false))
+                    await CopyAsync(source, target, TransferDirection.Download, total, ct, progress).ConfigureAwait(false);
+                await remote.CompleteReadAsync(ct).ConfigureAwait(false);
+                ct.ThrowIfCancellationRequested();
+                File.Move(temporaryPath, local, true);
+            }
+            finally
+            {
+                if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+            }
             return true;
         });
 
@@ -144,23 +156,6 @@ public sealed class FileConnection : IFileTransfer
             return true;
         });
 
-    static async Task CopyAtomicallyAsync(Stream source, string destination, TransferDirection direction, long? total, CancellationToken token, IProgress<TransferProgress>? progress)
-    {
-        token.ThrowIfCancellationRequested();
-        string temporaryPath = destination + ".portharbor-" + Guid.NewGuid().ToString("N") + ".part";
-        try
-        {
-            await using (var target = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan))
-                await CopyAsync(source, target, direction, total, token, progress).ConfigureAwait(false);
-            token.ThrowIfCancellationRequested();
-            File.Move(temporaryPath, destination, true);
-        }
-        finally
-        {
-            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
-        }
-    }
-
     static async Task CopyAsync(Stream source, Stream destination, TransferDirection direction, long? total, CancellationToken token, IProgress<TransferProgress>? progress)
     {
         var buffer = new byte[65536];
@@ -172,6 +167,8 @@ public sealed class FileConnection : IFileTransfer
             token.ThrowIfCancellationRequested();
             int count = await source.ReadAsync(buffer.AsMemory(), token).ConfigureAwait(false);
             if (count == 0) break;
+            if (total.HasValue && transferred + count > total.Value)
+                throw new IOException("The transfer exceeded its expected byte count.");
             await destination.WriteAsync(buffer.AsMemory(0, count), token).ConfigureAwait(false);
             transferred += count;
             if (lastReported < 0 || transferred - lastReported >= 4 * 1024 * 1024 || reportClock.Elapsed >= TimeSpan.FromMilliseconds(100))
@@ -181,6 +178,8 @@ public sealed class FileConnection : IFileTransfer
                 reportClock.Restart();
             }
         }
+        if (total.HasValue && transferred != total.Value)
+            throw new EndOfStreamException("The transfer ended before its expected byte count.");
         await destination.FlushAsync(token).ConfigureAwait(false);
         if (transferred != lastReported) progress?.Report(new TransferProgress(direction, transferred, total));
     }

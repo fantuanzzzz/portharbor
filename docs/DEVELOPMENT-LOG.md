@@ -4,6 +4,29 @@ This workbook records every development session. Each entry covers what changed,
 
 本文档保留历史开发与验证记录；各条目的“下一步”表示当时的安排。当前阶段状态、任务勾选及验收条件统一维护在[技术方案第 8 节](TECHNICAL-PLAN.md#8-分阶段实施)，文件传输当前契约见[文件传输约定](FILE-TRANSFER.md)。历史条目不随当前实现变化而回写。
 
+## 2026-10-27 - 传输中断时保护旧目标与下载完成门禁
+
+### 问题与修复
+
+- 检查发现下载只读到 EOF 就替换本地文件，没有校验已知长度或 FTP 最终完成响应。先新增共享回归：远端声称 100 字节、实际只返回 3 字节，旧实现未抛出预期异常；失败记录为 ignored `artifacts/transfer-interruption/application-before-fix.json`。
+- `FileConnection` 下载先写本地唯一 `.part`，核对已知字节数并关闭两条流，再调用新增 `IRemoteFileSystem.CompleteReadAsync`；确认成功且未取消才替换本地目标。FTP 等待最终控制响应，失败响应拒绝提交；SFTP 文件流关闭已完成协议确认，新增端口只检查取消。
+- 公共复制策略拒绝提前 EOF 和超额数据；已知长度不符不提交，未知长度继续支持且仍要求协议确认。长度核对不是内容哈希校验。上传旧目标保护沿用暂存后提交语义，没有引入自动重连或重放。
+- 共享检查增加每协议 6 项：提前 EOF 保留旧文件、不创建新目标、拒绝超额字节、未知长度最终确认失败保护、未知长度正常完成，以及关闭时取消待确认下载并清理本地暂存。已有正常下载检查同时要求先关闭读流再确认。
+- 协议 fixture 增加 FTP/SFTP 上传/下载中途断开，以及 FTP 数据收全后返回 426。新增 `FileTransferInterruptionChecks.cs` 接入 `--integration`，检查真实故障标记、Reading/Writing 阶段、目标保护、下载临时文件、关闭期限和通过新连接显式清理上传残片。FTP 故障关闭延后到 I/O 循环，避免内联关闭数据通道造成 fixture 自身状态异常。
+
+### 验证与交付
+
+- `build.ps1 -ExtendedBaseline -OutputDirectory artifacts/transfer-interruption/release` 在当前 Windows 用户桌面环境完整通过；锁定恢复、Release 构建 0 警告、0 错误。
+- Application 163、核心 336、Windows 14、协议 57、WinForms UI 57 项全部通过，共 627 项检查；ConPTY 标记、安装隔离启动、默认便携首次启动与重启四项冒烟通过。
+- JSON 报告、截图、终端输出及两个框架依赖 ZIP 位于 ignored `artifacts/transfer-interruption/release/`。本轮是工作区验收，没有重跑干净克隆、自包含分支或发布回滚故障注入；没有改变用户配置、数据格式或依赖版本。
+- 同步 README、文档索引、技术方案、文件传输及诊断约定。故障夹具只绑定 loopback，不进入应用发行包。
+
+### 限制与下一步
+
+- 控制连接失效后，远端 `.part` 的 5 秒尽力清理可能失败；测试验证残片仍保持独立临时名称，旧目标不被覆盖，且可通过新连接显式删除。不能承诺断网后服务器端无残留。
+- 本轮覆盖的是上传数据复制阶段断线；SFTP 将旧目标移到 `.bak` 后的覆盖提交窗口仍可能暂时没有目标路径，恢复失败时可能留下 `.part`/`.bak`。下一步补齐该窗口的断线与备份恢复检查，再完善恢复策略。
+- 真实服务器、FTPS、静默丢包、磁盘满、等长远端内容变化及实际 DNS 失败仍待专项验证。确认等待中的关闭通过共享端口检查，既有 UI 生命周期回归通过，没有声称完成实体设备验收。
+
 ## 2026-10-27 - SSH 突然掉线清理与 FTP 连接失败阶段
 
 ### 问题与实现
