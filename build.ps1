@@ -85,7 +85,17 @@ function Invoke-ExtendedChecks {
         if (-not (Test-Path -LiteralPath $serversPath)) { throw "Protocol fixture did not become ready: $(Get-Content -LiteralPath $stderr -Raw -ErrorAction SilentlyContinue)" }
         $timings.Add([pscustomobject]@{ Name = 'protocol-fixture-startup'; DurationMs = $readyWatch.ElapsedMilliseconds; ExitCode = 0 })
         $integrationReport = Join-Path $artifacts 'integration-results.json'
-        Invoke-TimedStep 'protocol-loopback' { & $Dotnet run --project $checks -c Release --no-build -- --integration $serversPath --results $integrationReport }
+        try {
+            Invoke-TimedStep 'protocol-loopback' { & $Dotnet run --project $checks -c Release --no-build -- --integration $serversPath --results $integrationReport }
+        }
+        catch {
+            foreach ($log in @($stdout, $stderr)) {
+                if (Test-Path -LiteralPath $log) {
+                    Copy-Item -LiteralPath $log -Destination (Join-Path $artifacts (Split-Path $log -Leaf)) -Force
+                }
+            }
+            throw
+        }
         $extraReports.Add($integrationReport)
     }
         finally {

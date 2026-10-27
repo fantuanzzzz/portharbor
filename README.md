@@ -100,7 +100,7 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 发布冒烟会等待实际 EXE 退出并检查退出码，分别验证隔离数据目录的安装模式，以及不指定 `--data-dir` 的默认便携首次启动和重启；便携模式必须在程序旁创建 INI。报告为 `startup-smoke-results.json`，冒烟生成的空配置不进入发行包。
 
-要测完整 Windows 基线（另含协议回环、WinForms 渲染和 ConPTY 交互），先安装 `tests/requirements.txt` 中的测试依赖，再运行 `./build.ps1 -ExtendedBaseline -OutputDirectory ./artifacts/engineering-baseline`。该入口要求 Python 3.12+、可运行的交互式 Windows 桌面；所有计时与检查数量写入 `engineering-baseline.json`，截图和 UI/协议报告仅位于忽略的 `artifacts` 目录。
+要测完整 Windows 基线（另含协议回环、WinForms 渲染和 ConPTY 交互），先安装 `tests/requirements.txt` 中的测试依赖，再运行 `./build.ps1 -ExtendedBaseline -OutputDirectory ./artifacts/engineering-baseline`。该入口要求 Python 3.12+、当前 Windows 用户的可交互桌面环境（DPAPI 检查需要该用户的凭据保护能力）；所有计时与检查数量写入 `engineering-baseline.json`，截图和 UI/协议报告仅位于忽略的 `artifacts` 目录。协议集成失败时，同目录保留 `protocol-fixture-out.log` 和 `protocol-fixture-error.log` 供本地排查。
 
 若旧发行目录中的程序仍在运行，可通过 `./build.ps1 -OutputDirectory ./artifacts/preview` 输出到独立目录，避免覆盖正在使用的文件。切换新版前先关闭旧程序，同一配置目录不要同时运行两版。
 
@@ -124,7 +124,9 @@ build.ps1                       构建和发布
 
 ## 验证
 
-本地诊断消息目录及便携启动修复后，Application 检查 151 项、核心检查 320 项、Windows 检查 14 项及 UI 检查 57 项通过。核心新增默认便携首次启动/重启、显式数据目录末尾分隔符和盘符根目录回归；发布门禁同时覆盖安装与默认便携启动。检查包含消息资源完整性、语言/未知枚举回退、全协议提示脱敏，以及 JSON/INI 交叉格式与原子回滚；协议回环最近一次为文件选择器增量的 26 项通过。逐次记录见 [开发日志](docs/DEVELOPMENT-LOG.md)，当前约定见 [诊断消息](docs/DIAGNOSTICS.md)和[会话配置导入导出](docs/CONFIGURATION-TRANSFER.md)。
+2026-10-27 对提交 `e110c4e`（`v1.0.5`）进行了 Windows 本机独立干净克隆验收，没有复制原目录的构建产物或依赖缓存。锁定恢复和 Release 编译通过（0 警告、0 错误）；Application 151、核心 320、Windows 14、协议回环 26、UI 57 项检查全部通过，共 568 项。ConPTY、安装隔离目录、默认便携首次启动及重启四项冒烟也通过。原始结果位于 ignored `artifacts/clean-checkout-acceptance-20261027/artifacts/baseline/`；该数字为检查计数，不是源码覆盖率。
+
+检查包括默认便携路径与 INI 创建、消息资源完整性、未知枚举/语言回退、全协议提示脱敏、JSON/INI 交叉格式和原子回滚。此次是同一台机器上的独立克隆验证；此前系统 Temp 克隆的 FTP 550 根因尚未确认，另一台机器复现仍需验收。逐次记录见 [开发日志](docs/DEVELOPMENT-LOG.md)，当前约定见 [诊断消息](docs/DIAGNOSTICS.md)和[会话配置导入导出](docs/CONFIGURATION-TRANSFER.md)。
 
 RDP 验证覆盖配置、启动失败、进程退出清理及界面重试，不含真实远程桌面登录；串口尚无实体设备测试。FTPS、私钥登录和其他服务器实现也尚未完成实机互通测试。
 

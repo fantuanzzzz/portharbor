@@ -4,6 +4,28 @@ This workbook records every development session. Each entry covers what changed,
 
 本文档保留历史开发与验证记录；各条目的“下一步”表示当时的安排。当前阶段状态、任务勾选及验收条件统一维护在[技术方案第 8 节](TECHNICAL-PLAN.md#8-分阶段实施)，文件传输当前契约见[文件传输约定](FILE-TRANSFER.md)。历史条目不随当前实现变化而回写。
 
+## 2026-10-27 - 独立干净 checkout 验收及协议失败日志归档
+
+### 验收对象与结果
+
+- 验收提交为 `e110c4e27da743c926515076300bbfed6004089b`（`v1.0.5`）。通过 `git clone --no-hardlinks` 创建独立克隆，没有复制原工作区的 `bin/obj`、`.packages` 或 `.build-home`；运行前后克隆的 Git 工作树均为空。
+- 在当前 Windows 用户的交互式桌面环境，以 .NET SDK 8.0.426 完成锁定恢复、Release 构建和 `build.ps1 -ExtendedBaseline`。构建 0 警告、0 错误；Application 151、核心 320、Windows 14、协议回环 26、WinForms UI 57 项全部通过，共 568 项检查。该数字不是代码行/分支覆盖率。
+- ConPTY 界面 `CONPTY_OK`、安装模式隔离目录启动、默认便携首次启动和重启四项冒烟均通过；生成安装布局及便携 ZIP。本轮为框架依赖包，没有重跑 `-IncludeRuntime` 或发布回滚故障注入。
+- 原始报告位于 ignored `artifacts/clean-checkout-acceptance-20261027/artifacts/baseline/engineering-baseline.json`，同目录包含各组 JSON、截图、终端输出与构建产物。GitHub 源码只保留本文摘要，不提交生成文件。
+
+### 排查与脚本改动
+
+- 沙箱身份运行时 DPAPI 返回系统错误；切换当前 Windows 用户环境后核心及 Windows 检查通过。这一前置环境条件不作为产品缺陷修复。
+- 更早的系统 Temp 克隆在 FTP 首次上传临时文件时重复返回 `550 No such file or directory`；同一提交在项目盘独立克隆及主工作区完整基线均通过。**根因尚未确认**，不能据此断定所有 Temp 路径或所有 FTP 服务器均正常，也没有修改 FTP/SFTP 产品实现。
+- `build.ps1` 增加协议集成失败时将 `protocol-fixture-out.log` 和 `protocol-fixture-error.log` 复制到报告目录的处理，避免 staging 清理后失去诊断现场。主工作区完整扩展基线已通过；独立干净克隆验收对象仍是上述提交，不包含这项新增脚本改动。
+- 单独提取实际 `Invoke-ExtendedChecks` 函数、启动真实 loopback fixture，并在协议计时入口注入预期失败：原错误继续抛出，两份日志保留，APPDATA 恢复，fixture 进程停止。检查产物在 ignored `artifacts/acceptance-investigation/log-retention-check/`。脚本语法、四份文档本地链接及 `git diff --check` 均通过。
+- 同步更新项目 README、文档索引和技术方案，区分本机干净克隆已验收与另一台机器、真实设备/服务器尚待验收。原始 fixture 日志仅供本地诊断，不新增 CI 自动上传。
+
+### 下一步
+
+- 按技术方案阶段 1 补齐断网、无效主机和连接中断等故障场景；真实串口、RDP 登录、FTPS、私钥登录和生产服务器互通留待对应环境验收。
+- 阶段 0 的本机干净 checkout 和计时基线已验收；发布失败的更多故障注入与回滚范围仍待补齐，暂不将整个阶段标为完成。
+
 ## 2026-10-27 - 扩展工程基线覆盖所有 Windows 自动化入口
 
 ### 本次开发内容

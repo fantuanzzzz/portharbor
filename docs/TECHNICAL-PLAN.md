@@ -183,7 +183,7 @@ tests/
 
 | 阶段 | 状态 | 当前结论 |
 | --- | --- | --- |
-| 0：工程基线 | 进行中 | 已有检查分层、CI、锁定恢复、差异空白检查及发布冒烟/回滚验证，干净 checkout 与耗时基线仍待验收 |
+| 0：工程基线 | 进行中 | Windows 本机独立干净 checkout、锁定恢复、完整扩展检查及耗时基线已验收；发布故障注入与回滚范围仍待补齐 |
 | 1：诊断与稳健性 | 进行中 | 文件传输已异步化并有取消/超时/关闭测试；其余协议诊断和后台生命周期仍待完善 |
 | 2：稳定内核 | 进行中 | Domain/Application 承载会话、配置、导入导出、文件传输和终端编排；存储及网络适配器在 Infrastructure，其余纯逻辑仍待梳理 |
 | 3：协议与平台隔离 | 部分提前完成 | 文件传输、SSH/Telnet 已分层；Windows 平台实现、能力、路径及文件选择端口已接入，真实设备/远程登录验收仍待完成 |
@@ -199,13 +199,15 @@ tests/
 - [x] 加入 Windows CI，执行恢复、Release 构建及上述检查，上传结果报告。
 - [x] 使用 NuGet 依赖锁文件。
 - [x] 加入自动差异空白检查及强制锁定模式恢复验证。
-- [x] 将发行包启动冒烟纳入发布流程；通过 `tests/build-rollback.ps1` 验证失败后保留旧产物，干净 checkout 仍待验收。
+- [x] 将发行包启动冒烟纳入发布流程；已有 `tests/build-rollback.ps1` 验证失败后保留旧产物。
+- [x] 在 Windows 本机独立干净 checkout、空构建/依赖缓存下完成锁定恢复与完整扩展基线；验收提交 `e110c4e`，共 568 项检查及四项冒烟通过。
+- [ ] 补齐发布失败的故障注入范围，分别核验替换前、部分目标替换后及旧产物被占用时的回滚行为；已有替换完成后注入检查不代表这些场景均已覆盖。
 - [x] 建立构建、测试耗时和覆盖范围基线；发布脚本生成 `engineering-baseline.json`，区分检查计数与尚未接入的源代码覆盖率。
 - [x] 发布脚本使用 staging，成功后替换产物，失败时尝试回滚。
 - [x] 增加总体技术方案。
 - [x] 增加 ADR 模板。
 
-依据：[`windows-ci.yml`](../.github/workflows/windows-ci.yml)、[`build.ps1`](../build.ps1)、[`build-rollback.ps1`](../tests/build-rollback.ps1)、[`packages.lock.json`](../src/PortHarbor/packages.lock.json)、[`ADR 模板`](adr/0000-template.md)；基线报告为 `engineering-baseline.json`，历史构建与检查结果见[开发日志](DEVELOPMENT-LOG.md)。干净 checkout 仍需在独立环境复核。
+依据：[`windows-ci.yml`](../.github/workflows/windows-ci.yml)、[`build.ps1`](../build.ps1)、[`build-rollback.ps1`](../tests/build-rollback.ps1)、[`packages.lock.json`](../src/PortHarbor/packages.lock.json)、[`ADR 模板`](adr/0000-template.md)；基线报告为 `engineering-baseline.json`，干净 checkout 的提交、环境、结果及限制见[开发日志](DEVELOPMENT-LOG.md)中“独立干净 checkout 验收及协议失败日志归档”。本次仅完成同一台 Windows 机器上的独立克隆验收，另一台机器的复现和原 Temp 克隆 FTP 550 的根因仍待确认。
 
 **完成条件：**干净 checkout 可按文档复现 build/test；PR 有自动结果；失败时能看到稳定测试名和机器可读报告；发布失败不删除旧 ZIP。
 
@@ -325,9 +327,9 @@ tests/
 
 以下安排对应第 8 节任务清单，不代表新增验收项：
 
-1. 在独立干净 checkout 复核扩展基线构建；真实串口设备、真实 RDP 登录及生产服务器兼容性仍需真实环境验收，不将当前工作区通过当成干净 checkout 通过。
-2. 继续补齐阶段 1 的故障场景与服务器兼容性；更多语言资源实施前另行补入阶段 1 清单，按实际需求验收。
-3. 补齐阶段 0 尚未验收的故障注入和发布回滚范围，具体缺口见第 8 节。
+1. 继续补齐阶段 1 的断网、无效主机和连接中断等故障场景与服务器兼容性；更多语言资源实施前另行补入阶段 1 清单，按实际需求验收。
+2. 真实串口设备、真实 RDP 登录、FTPS、私钥登录及生产服务器兼容性仍需对应环境验收；本机干净克隆通过不替代这些专项结果。
+3. 补齐阶段 0 尚未验收的发布故障注入和回滚范围，具体缺口见第 8 节；原 Temp 克隆 FTP 550 如再次出现，使用保留的 fixture 日志继续定位。
 4. 继续按阶段 2、3 完善其余应用端口，保持 Windows 行为及用户数据兼容。
 5. 阶段 4 仅在目标用户、交付平台和能力清单明确后启动。
 

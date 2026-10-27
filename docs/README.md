@@ -28,9 +28,9 @@
 
 导入导出业务策略已迁入 Application；分类合并、新 ID 分配及敏感字段排除可脱离 Windows 检查，存储适配器保留原格式与原子保存。
 
-最新便携启动修复已验证 Application 151 项、核心 320 项、Windows 14 项和 WinForms UI 57 项。发布门禁新增不指定数据目录的便携首次启动与重启，实际等待 EXE 退出并检查 INI 创建；此前仅使用隔离数据目录的冒烟未覆盖这一缺陷。连接诊断呈现与内嵌消息目录均可脱离 Windows 检查。ConPTY 界面输出及协议回环最近一次记录分别见诊断消息与文件选择器增量。记录见[开发日志](DEVELOPMENT-LOG.md)。
+提交 `e110c4e` 已在 Windows 本机独立干净克隆和空构建/依赖缓存下完成扩展基线：Application 151 项、核心 320 项、Windows 14 项、协议回环 26 项、WinForms UI 57 项全部通过；ConPTY 及三项发布启动冒烟通过。默认便携首次启动与重启不指定数据目录，并检查 EXE 退出码和 INI 创建。记录及环境限制见[开发日志](DEVELOPMENT-LOG.md)。
 
-阶段 0 的扩展基线可用 `build.ps1 -ExtendedBaseline` 纳入协议回环、WinForms UI 和 ConPTY；`engineering-baseline.json` 记录这些入口与发布流程各阶段的耗时及检查数量，且明确不是代码行覆盖率报告。干净 checkout 验收、真实串口设备、真实 RDP 登录、FTPS、私钥登录和多种生产服务器兼容性仍需专项验收。
+阶段 0 的扩展基线可用 `build.ps1 -ExtendedBaseline` 纳入协议回环、WinForms UI 和 ConPTY；`engineering-baseline.json` 记录各入口与发布流程的耗时及检查数量，不是代码行覆盖率报告。协议集成失败时 fixture 日志留在本地报告目录。发布故障注入与回滚范围、另一台机器复现、真实串口设备、真实 RDP 登录、FTPS、私钥登录和多种生产服务器兼容性仍需专项验收；原 Temp 克隆中的 FTP 550 根因尚未确认。
 
 ## 发布前检查
 
