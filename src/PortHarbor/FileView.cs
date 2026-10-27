@@ -50,7 +50,7 @@ public sealed class FileView : UserControl
         toolbar.Enabled = true; foreach (Control c in toolbar.Controls) if (c != cancel) c.Enabled = false;
         status.Text = "处理中…";
         try { await operation(taskStop.Token); if (!closing) status.Text = taskStop.IsCancellationRequested ? "任务已取消" : "就绪"; }
-        catch (OperationCanceledException) { if (!closing) status.Text = "任务已取消；原目标文件已保留。"; }
+        catch (OperationCanceledException) { if (!closing) status.Text = "任务已取消；请刷新目录并核对操作结果。"; }
         catch (Exception) { if (!closing) { status.Text = "操作失败"; MessageBox.Show(this, connection.State == ConnectionState.Failed ? "文件操作失败，请根据状态栏中的错误码排查。" : "文件操作未完成。", "PortHarbor", MessageBoxButtons.OK, MessageBoxIcon.Error); } }
         finally
         {

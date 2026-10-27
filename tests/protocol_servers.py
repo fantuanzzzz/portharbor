@@ -47,8 +47,21 @@ class FaultHandle(paramiko.SFTPHandle):
         if self.name.startswith('drop-upload.bin.portharbor-') and offset>=65536: return self.drop()
         return super().write(offset,data)
 class Sftp(paramiko.SFTPServerInterface):
+    commit_faults={'stall-restore','reject-publish','reject-restore','drop-before-backup','drop-after-backup','drop-before-publish','drop-after-publish','drop-after-restore','stall-cleanup'}
     def __init__(self,server,*args,**kwargs):
-        super().__init__(server,*args,**kwargs); self.transport=server.transport
+        super().__init__(server,*args,**kwargs); self.transport=server.transport; self.commit_name=None
+    def commit_mark(self,event):
+        (sftp_root/'faults'/(self.commit_name+'.'+event)).write_text(event)
+    def commit_drop(self):
+        self.commit_mark('disconnected')
+        self.transport.sock.shutdown(socket.SHUT_RDWR); self.transport.close()
+        return paramiko.SFTP_FAILURE
+    def commit_stall(self,event):
+        self.commit_mark(event)
+        # Keep the request unanswered until the client closes this connection.
+        # No mutation may run later after a cancelled request.
+        while self.transport.is_active(): time.sleep(.02)
+        return paramiko.SFTP_FAILURE
     def path(self,path):
         result=(sftp_root/path.lstrip('/')).resolve()
         if not result.is_relative_to(sftp_root): raise PermissionError('outside fixture')
@@ -77,10 +90,39 @@ class Sftp(paramiko.SFTPServerInterface):
         try: self.path(path).rmdir(); return paramiko.SFTP_OK
         except OSError as e: return paramiko.SFTPServer.convert_errno(e.errno)
     def remove(self,path):
-        try: self.path(path).unlink(); return paramiko.SFTP_OK
+        try:
+            if self.commit_name=='commit-stall-cleanup.bin' and path.endswith('.bak'):
+                return self.commit_stall('cleanup-stalled')
+            self.path(path).unlink(); return paramiko.SFTP_OK
         except OSError as e: return paramiko.SFTPServer.convert_errno(e.errno)
     def rename(self,old,new):
-        try: self.path(old).rename(self.path(new)); return paramiko.SFTP_OK
+        try:
+            oldname=pathlib.PurePosixPath(old).name; newname=pathlib.PurePosixPath(new).name
+            names={'commit-'+mode+'.bin' for mode in self.commit_faults}
+            if oldname in names and newname.startswith(oldname+'.portharbor-') and newname.endswith('.bak'):
+                self.commit_name=oldname; self.commit_mark('backup-requested')
+                if oldname=='commit-drop-before-backup.bin': return self.commit_drop()
+                self.path(old).rename(self.path(new)); self.commit_mark('backed-up')
+                if oldname=='commit-drop-after-backup.bin': return self.commit_drop()
+                return paramiko.SFTP_OK
+            if self.commit_name==newname and oldname.startswith(newname+'.portharbor-'):
+                if oldname.endswith('.part'):
+                    self.commit_mark('publish-requested')
+                    if newname in {'commit-stall-restore.bin','commit-reject-publish.bin','commit-reject-restore.bin','commit-drop-after-restore.bin'}:
+                        self.commit_mark('publish-rejected'); return paramiko.SFTP_PERMISSION_DENIED
+                    if newname=='commit-drop-before-publish.bin': return self.commit_drop()
+                    self.path(old).rename(self.path(new)); self.commit_mark('published')
+                    if newname=='commit-drop-after-publish.bin': return self.commit_drop()
+                    return paramiko.SFTP_OK
+                if oldname.endswith('.bak'):
+                    self.commit_mark('restore-requested')
+                    if newname=='commit-stall-restore.bin': return self.commit_stall('restore-stalled')
+                    if newname=='commit-reject-restore.bin':
+                        self.commit_mark('restore-rejected'); return paramiko.SFTP_PERMISSION_DENIED
+                    self.path(old).rename(self.path(new)); self.commit_mark('restored')
+                    if newname=='commit-drop-after-restore.bin': return self.commit_drop()
+                    return paramiko.SFTP_OK
+            self.path(old).rename(self.path(new)); return paramiko.SFTP_OK
         except OSError as e: return paramiko.SFTPServer.convert_errno(e.errno)
     def posix_rename(self,old,new):
         try: self.path(old).replace(self.path(new)); return paramiko.SFTP_OK

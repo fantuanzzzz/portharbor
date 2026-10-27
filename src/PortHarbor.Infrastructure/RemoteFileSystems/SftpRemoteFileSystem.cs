@@ -4,6 +4,7 @@ namespace PortHarbor;
 
 internal sealed class SftpRemoteFileSystem(Session session, IHostKeyTrust hostKeyTrust, string password, Func<string, bool> confirm) : IRemoteFileSystem
 {
+    static readonly TimeSpan RecoveryTimeout = TimeSpan.FromSeconds(5);
     SftpClient? client;
     PrivateKeyFile? key;
     SftpClient Client => client ?? throw new InvalidOperationException("SFTP 尚未连接。");
@@ -56,21 +57,31 @@ internal sealed class SftpRemoteFileSystem(Session session, IHostKeyTrust hostKe
         // SSH.NET 2026 exposes cancellation-aware standard rename, while the existing
         // overwrite extension only has a synchronous overload.
         string backup = destination + ".portharbor-" + Guid.NewGuid().ToString("N") + ".bak";
-        await Client.RenameFileAsync(destination, backup, token).ConfigureAwait(false);
-        try { await Client.RenameFileAsync(temporaryPath, destination, token).ConfigureAwait(false); }
+        try
+        {
+            // Either rename may have executed even when its acknowledgement was lost.
+            await Client.RenameFileAsync(destination, backup, token).ConfigureAwait(false);
+            await Client.RenameFileAsync(temporaryPath, destination, token).ConfigureAwait(false);
+        }
         catch
         {
+            // Recovery has its own short budget, including when the caller cancelled.
+            // Never reconnect/replay here or overwrite a target already present.
+            using var recovery = new CancellationTokenSource(RecoveryTimeout);
             try
             {
-                if (!await Client.ExistsAsync(destination, CancellationToken.None).ConfigureAwait(false))
-                    await Client.RenameFileAsync(backup, destination, CancellationToken.None).ConfigureAwait(false);
+                if (!await Client.ExistsAsync(destination, recovery.Token).ConfigureAwait(false)
+                    && await Client.ExistsAsync(backup, recovery.Token).ConfigureAwait(false))
+                    await Client.RenameFileAsync(backup, destination, recovery.Token).ConfigureAwait(false);
             }
-            catch { }
+            catch { /* Keep the original failure and leave the backup for explicit recovery. */ }
             throw;
         }
 
-        // Cleanup must not turn a committed upload into a reported failure.
-        try { await Client.DeleteFileAsync(backup, CancellationToken.None).ConfigureAwait(false); } catch { }
+        // Cleanup must neither block indefinitely nor turn a confirmed commit into failure.
+        using var cleanup = new CancellationTokenSource(RecoveryTimeout);
+        try { await Client.DeleteFileAsync(backup, cleanup.Token).ConfigureAwait(false); }
+        catch { /* A confirmed replacement remains successful; the old backup may remain. */ }
     }
 
     public Task DeleteFileAsync(string path, CancellationToken token) => Client.DeleteFileAsync(path, token);

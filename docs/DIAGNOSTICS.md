@@ -29,6 +29,7 @@ Domain 的 `ConnectionDiagnostic` 保存稳定 OperationId、协议、状态、�
 - FTP 的 Connect 包含 TCP 连接及登录：初始阶段为 `Connecting`；捕获明确的 `FtpAuthenticationException` 后标注 `Authenticating`，错误类别为 `AuthenticationFailed`。TCP 连接拒绝不再误标认证阶段，密码错误不作为可重试网络错误。
 - 正常 SSH Shell 退出和 Telnet EOF 不发布失败；主动取消保持 `Cancelled`。可重试性只是诊断元数据，不表示自动重连。
 - 文件传输在数据复制阶段断线时保留 Reading/Writing 阶段及原操作编号。已知长度不符或 FTP 最终完成响应拒绝以协议错误报告，不当作成功下载替换旧文件；网络异常仍按原类型归类，失联后远端临时文件清理可能失败。
+- SFTP 覆盖提交失败时，备份恢复的拒绝/超时不替换原始 Writing 错误；恢复成功也不伪装上传成功。新文件重命名已确认成功后，旧备份清理失败仍返回成功。确认丢失意味着远端状态需要核对，取消提示不得承诺原路径一定保留旧文件；恢复文件的详细结构化报告尚属技术方案中的诊断闭环欠项。
 
 ## 安全与维护
 
@@ -44,6 +45,7 @@ Domain 的 `ConnectionDiagnostic` 保存稳定 OperationId、协议、状态、�
 - `tests/PortHarbor.Checks/DiagnosticChecks.cs`：厂商异常分类、原始消息脱敏及真实协议失败诊断。
 - `tests/PortHarbor.Checks/NetworkFailureChecks.cs`：四种网络协议的拒绝连接、FTP 错误密码、SSH 正常退出/连接丢失和 Telnet 正常 EOF/TCP reset。
 - `tests/PortHarbor.Checks/FileTransferInterruptionChecks.cs`：FTP/SFTP 上传/下载断线及 FTP 最终确认拒绝，检查原阶段、目标保留和关闭完成。
+- `tests/PortHarbor.Checks/SftpCommitChecks.cs`：覆盖提交/恢复的断线及拒绝、恢复/备份清理无响应，核验原始结果、恢复文件和显式新连接恢复。
 - `tests/PortHarbor.Checks/DiagnosticUiChecks.cs`：后台 UI 更新、失败保留/清除、未知诊断回退、操作编号和实际终端/RDP 页面。
 
 本轮验证及发布记录见[开发日志](DEVELOPMENT-LOG.md)。
