@@ -29,7 +29,6 @@ $targets = @(
 )
 $targets += @{ Staged = $stagePortable; Target = $portable; Directory = $true }
 $targets += @{ Staged = $stagePortableZip; Target = $portableZip; Directory = $false }
-$installed = [System.Collections.Generic.List[string]]::new()
 $smokeResults = [System.Collections.Generic.List[object]]::new()
 $timings = [System.Collections.Generic.List[object]]::new()
 $extraReports = [System.Collections.Generic.List[string]]::new()
@@ -189,33 +188,17 @@ try {
         }
     } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $artifacts 'engineering-baseline.json') -Encoding UTF8
 
-    New-Item -ItemType Directory -Force $backup | Out-Null
-    foreach ($output in $targets) {
-        if (Test-Path -LiteralPath $output.Target) {
-            Move-Item -LiteralPath $output.Target -Destination $backup
-        }
-    }
-    foreach ($output in $targets) {
-        Move-Item -LiteralPath $output.Staged -Destination $output.Target
-        $installed.Add($output.Target)
-    }
-    if ($SimulateFailureAfterInstall) { throw 'Simulated failure after publish replacement.' }
-    Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
+    $publish = Join-Path $PSScriptRoot 'scripts\Publish-StagedArtifacts.ps1'
+    $publishTargets = @($targets | ForEach-Object { @{ Staged = $_.Staged; Target = $_.Target } })
+    $publishArgs = @{ StagingDirectory = $staging; BackupDirectory = $backup; Targets = $publishTargets }
+    if ($SimulateFailureAfterInstall) { $publishArgs.FailAfterInstallCount = $publishTargets.Count }
+    & $publish @publishArgs
     Write-Host "Portable: $portableZip"
     Write-Host "Installed layout (installer pending): $frameworkZip"
 }
-catch {
-    foreach ($path in $installed) {
-        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
-    }
-    if (Test-Path -LiteralPath $backup) {
-        foreach ($output in $targets) {
-            $previous = Join-Path $backup (Split-Path $output.Target -Leaf)
-            if (Test-Path -LiteralPath $previous) { Move-Item -LiteralPath $previous -Destination $output.Target -Force }
-        }
-    }
-    throw
-}
+catch { throw }
 finally {
-    if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
+    if ((Test-Path -LiteralPath $staging) -and -not (Test-Path -LiteralPath $backup)) {
+        Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }

@@ -2,7 +2,7 @@ using System.Net.Sockets;
 
 namespace PortHarbor;
 
-internal sealed class TelnetTerminalTransport(Session session) : StreamTerminalTransport
+internal sealed class TelnetTerminalTransport(TelnetProtocolConfiguration session) : StreamTerminalTransport
 {
     readonly List<byte[]> replies = [];
     TelnetCodec? codec;

@@ -12,11 +12,17 @@ root=pathlib.Path(args.root).resolve(); root.mkdir(parents=True,exist_ok=True)
 ftp_root=root/'ftp'; ftp_root.mkdir(exist_ok=True)
 sftp_root=root/'sftp'; sftp_root.mkdir(exist_ok=True)
 class Auth(paramiko.ServerInterface):
-    def check_auth_password(self,user,password): return paramiko.AUTH_SUCCESSFUL if user=='easytest' and password=='easytest-only' else paramiko.AUTH_FAILED
+    def check_auth_password(self,user,password):
+        self.user=user
+        return paramiko.AUTH_SUCCESSFUL if user in {'easytest','stallchannel'} and password=='easytest-only' else paramiko.AUTH_FAILED
     def get_allowed_auths(self,user): return 'password'
     def check_channel_request(self,kind,channel): return paramiko.OPEN_SUCCEEDED if kind=='session' else paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
     def check_channel_pty_request(self,*args): return True
     def check_channel_shell_request(self,channel):
+        if self.user=='stallchannel':
+            (root/'shell-channel-stalled').write_text('ready')
+            while self.transport.is_active(): time.sleep(.02)
+            return False
         def shell():
             try:
                 channel.send(b'SSH_TEST_READY\r\n')
@@ -129,6 +135,17 @@ class Sftp(paramiko.SFTPServerInterface):
         except OSError as e: return paramiko.SFTPServer.convert_errno(e.errno)
 key=paramiko.RSAKey.generate(2048)
 ssh=socket.socket(); ssh.bind(('127.0.0.1',0)); ssh.listen(10)
+stalled=socket.socket(); stalled.bind(('127.0.0.1',0)); stalled.listen(10)
+def accept_stalled():
+    while True:
+        client,_=stalled.accept()
+        def hold(client=client):
+            try:
+                while client.recv(4096): pass
+            except OSError: pass
+            finally: client.close()
+        threading.Thread(target=hold,daemon=True).start()
+threading.Thread(target=accept_stalled,daemon=True).start()
 def accept_ssh():
     while True:
         client,_=ssh.accept()
@@ -171,6 +188,6 @@ class FaultFtp(FTPHandler):
 auth=DummyAuthorizer(); auth.add_user('easytest','easytest-only',str(ftp_root),perm='elradfmwMT')
 FaultFtp.authorizer=auth
 server=FTPServer(('127.0.0.1',0),FaultFtp)
-(root/'servers.json').write_text(json.dumps({'ftpPort':server.socket.getsockname()[1],'sftpPort':ssh.getsockname()[1]}))
+(root/'servers.json').write_text(json.dumps({'ftpPort':server.socket.getsockname()[1],'sftpPort':ssh.getsockname()[1],'stalledPort':stalled.getsockname()[1]}))
 print('READY '+str(root/'servers.json'),flush=True)
 server.serve_forever()

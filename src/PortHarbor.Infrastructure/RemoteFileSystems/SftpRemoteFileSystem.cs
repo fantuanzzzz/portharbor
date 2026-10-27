@@ -2,7 +2,7 @@ using Renci.SshNet;
 
 namespace PortHarbor;
 
-internal sealed class SftpRemoteFileSystem(Session session, IHostKeyTrust hostKeyTrust, string password, Func<string, bool> confirm) : IRemoteFileSystem
+internal sealed class SftpRemoteFileSystem(SftpProtocolConfiguration session, IHostKeyTrust hostKeyTrust, string password, Func<string, bool> confirm) : IRemoteFileSystem
 {
     static readonly TimeSpan RecoveryTimeout = TimeSpan.FromSeconds(5);
     SftpClient? client;
@@ -12,8 +12,8 @@ internal sealed class SftpRemoteFileSystem(Session session, IHostKeyTrust hostKe
     public async Task ConnectAsync(Action<ConnectionStage> reportStage, CancellationToken token)
     {
         reportStage(ConnectionStage.Authenticating);
-        client = new SftpClient(SshClientSupport.SshInfo(session, password, out key));
-        SshClientSupport.HostKey(client, session, hostKeyTrust, confirm, reportStage);
+        client = new SftpClient(SshClientSupport.SshInfo(session.Host, session.Port, session.Username, session.PrivateKey, password, out key));
+        SshClientSupport.HostKey(client, session.Host, session.Port, hostKeyTrust, confirm, reportStage);
         reportStage(ConnectionStage.Connecting);
         client.OperationTimeout = TimeSpan.FromSeconds(35);
         token.ThrowIfCancellationRequested();

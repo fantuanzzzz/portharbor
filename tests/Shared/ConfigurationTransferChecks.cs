@@ -6,6 +6,16 @@ internal static class ConfigurationTransferChecks
 {
     internal static void Run(Action<bool, string> check)
     {
+        var typed = new Session { Protocol = Protocol.Serial, SerialPort = "COM7", BaudRate = 9600 }.ProtocolConfiguration;
+        check(typed is SerialProtocolConfiguration serial && serial.PortName == "COM7" && serial.BaudRate == 9600,
+            "protocol configuration exposes a typed serial view without changing the persisted session shape");
+        var network = new Session { Protocol = Protocol.SFTP, Host = "host.invalid", Port = 2222, Username = "u", PrivateKey = "key", UseTls = false }.ProtocolConfiguration;
+        var shell = new Session { Protocol = Protocol.Shell, Executable = "pwsh.exe", Arguments = "-NoLogo", WorkingDirectory = "C:\\" }.ProtocolConfiguration;
+        var rdp = new Session { Protocol = Protocol.RDP, Host = "desktop.invalid", Port = 3390, Username = "u", RdpFullScreen = true, Clipboard = false }.ProtocolConfiguration;
+        check(network is SftpProtocolConfiguration n && n.Host == "host.invalid" && n.Port == 2222 && n.PrivateKey == "key"
+            && shell is ShellProtocolConfiguration sh && sh.Executable == "pwsh.exe"
+            && rdp is RdpProtocolConfiguration r && r.FullScreen && !r.Clipboard,
+            "protocol configuration views preserve network, shell and RDP options without changing legacy DTOs");
         var existing = new Session { Host = "existing.invalid", SavePassword = true };
         var incoming = existing with { Name = "导入 🔑", Group = "Work/New", PrivateKey = "private key path" };
         var storage = new FixtureTransfer

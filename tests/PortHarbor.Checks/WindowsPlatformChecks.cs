@@ -58,6 +58,9 @@ internal static partial class Program
         await terminal.CloseAsync();
         Check(terminal.State == ConnectionState.Closed && !diagnostics.Any(d => d.State == ConnectionState.Failed),
             "Windows platform shell close interrupts idle ConPTY I/O and awaits process cleanup");
+        using var child = new ConPty(new Session { Protocol = Protocol.Shell, Executable = "cmd.exe", Arguments = "/Q", WorkingDirectory = root }, 80, 24);
+        await Task.Run(child.Dispose).WaitAsync(TimeSpan.FromSeconds(10));
+        Check(child.Completion.IsCompletedSuccessfully, "ConPTY disposal awaits its owned process exit observer");
     }
 
     static IEnumerable<Control> Descendants(Control parent)

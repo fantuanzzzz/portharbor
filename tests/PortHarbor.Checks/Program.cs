@@ -43,6 +43,10 @@ internal static partial class Program
                 Storage(root); VaultAndGroups(root); Terminal(); Telnet(); await FileDiagnostics(root); await FileTransferContract(root);
                 DiagnosticClassification(root); await TerminalDiagnostics(root);
                 DiagnosticMessageChecks.Run(Check);
+                await DiagnosticLogChecks(root);
+                DiagnosticBundleChecks(root);
+                TypedConfigurationChecks();
+                SessionLibraryChecks.Run(Check);
                 SessionRepositoryCompatibility(root);
                 StorageAdapters(root);
                 ConfigurationTransferChecks.Run(Check);

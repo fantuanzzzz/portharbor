@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace PortHarbor;
 
 public enum Protocol { SSH, Telnet, RDP, FTP, SFTP, Serial, Shell }
@@ -26,6 +28,7 @@ public sealed record Session
     public bool RdpFullScreen { get; set; }
     public bool Clipboard { get; set; } = true;
     public bool SavePassword { get; set; }
+    [JsonIgnore] public ProtocolConfiguration ProtocolConfiguration => SessionProtocolConfiguration.Get(this);
 
     public void Validate()
     {

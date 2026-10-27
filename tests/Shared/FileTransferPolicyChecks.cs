@@ -87,6 +87,8 @@ internal static class FileTransferPolicyChecks
             await transfer.DownloadAsync("/data.bin", download, CancellationToken.None, TimeSpan.FromSeconds(5));
             Check(File.ReadAllBytes(download).SequenceEqual(content) && backend.OpenReads == 1 && backend.CompleteReadCalls == 1 && !backend.ReadOpen,
                 protocol + " downloads bytes through async shared transfer policy after closed-stream confirmation");
+            Check(diagnostics.Last() is { ErrorCode: ConnectionErrorCode.None, BytesTransferred: 300000, TotalBytes: 300000, TimeoutMs: 5000, DurationMs: >= 0 },
+                protocol + " completed download publishes actual byte counts and operation timing without paths");
 
             using var cancelUpload = new CancellationTokenSource();
             await CheckThrowsAsync<OperationCanceledException>(() => transfer.UploadAsync(local, "/data.bin", cancelUpload.Token, TimeSpan.FromSeconds(5),
@@ -109,6 +111,8 @@ internal static class FileTransferPolicyChecks
             backend.CommitError = new IOException("commit failed");
             await CheckThrowsAsync<IOException>(() => transfer.UploadAsync(local, "/data.bin", CancellationToken.None, TimeSpan.FromSeconds(5)));
             Check(backend.Files.Count == 1 && backend.Files["/data.bin"].SequenceEqual(content), protocol + " failed commit cleans temporary file and retains old destination");
+            Check(diagnostics.Last().Recovery == TransferRecoveryState.RemoteCommitUnconfirmed,
+                protocol + " failed upload commit reports uncertainty even if staging cleanup succeeds");
             backend.CommitError = null;
 
             backend.ExistsError = new UnauthorizedAccessException("private endpoint");

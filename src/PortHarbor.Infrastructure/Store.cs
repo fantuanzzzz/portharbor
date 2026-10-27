@@ -44,8 +44,7 @@ public sealed class Store : IDisposable, IConfigurationRepository, IVault, IHost
 
     public void AddGroup(string name)
     {
-        name = name.Trim();
-        if (name.Length == 0 || name.Any(char.IsControl) || name.Split('/').Any(part => string.IsNullOrWhiteSpace(part) || part != part.Trim() || part is "." or "..") || name.Contains('\\')) throw new ArgumentException("请输入有效的分类名称。");
+        name = GroupPath.Validate(name);
         lock (gate)
         {
             if (name == "默认" || Data.Groups.Concat(Data.Sessions.Select(s => s.Group)).Contains(name, StringComparer.OrdinalIgnoreCase))

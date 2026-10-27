@@ -76,6 +76,7 @@ try
     PortHarbor.Checks.PlatformCapabilityChecks.Run(Check);
     PortHarbor.Checks.ConfigurationTransferChecks.Run(Check);
     PortHarbor.Checks.DiagnosticMessageChecks.Run(Check);
+    PortHarbor.Checks.SessionLibraryChecks.Run(Check);
     Console.WriteLine($"{results.Count} checks passed");
     return 0;
 }

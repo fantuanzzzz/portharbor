@@ -2,7 +2,7 @@ using FluentFTP;
 
 namespace PortHarbor;
 
-internal sealed class FtpRemoteFileSystem(Session session, string password) : IRemoteFileSystem
+internal sealed class FtpRemoteFileSystem(FtpProtocolConfiguration session, string password) : IRemoteFileSystem
 {
     AsyncFtpClient? client;
     AsyncFtpClient Client => client ?? throw new InvalidOperationException("FTP 尚未连接。");

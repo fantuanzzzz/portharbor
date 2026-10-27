@@ -10,6 +10,8 @@ public sealed class MainForm : Form
     readonly RdpLauncher remoteDesktop;
     readonly IPlatformCapabilities capabilities;
     readonly PlatformConnectionPolicy platform;
+    readonly FileDiagnosticLog diagnosticLog;
+    readonly WindowsRemoteDesktopLauncher? ownedDesktopLauncher;
     readonly Func<Session, string, Func<string, bool>, ITerminalSession> createTerminal;
     readonly TreeView tree = new() { Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, HideSelection = false, FullRowSelect = true, ItemHeight = 32, ShowLines = false, ShowRootLines = false, BackColor = Color.FromArgb(242, 245, 250) };
     readonly TextBox search = new() { Dock = DockStyle.Top, PlaceholderText = "搜索会话、主机或协议…", Margin = new Padding(8) };
@@ -23,11 +25,14 @@ public sealed class MainForm : Form
         IRemoteDesktopLauncher? remoteDesktopLauncher = null, IPlatformCapabilities? capabilities = null, IFilePicker? filePicker = null)
     {
         this.store = store;
+        diagnosticLog = new FileDiagnosticLog(Path.Combine(store.Paths.ConfigurationDirectory, "logs"));
+        diagnosticLog.LoadSettings();
         this.configuration = configuration;
         this.filePicker = filePicker ?? new WindowsFilePicker(this);
         this.capabilities = capabilities ?? new WindowsPlatformCapabilities();
         platform = new PlatformConnectionPolicy(this.capabilities);
-        remoteDesktop = new RdpLauncher(remoteDesktopLauncher ?? new WindowsRemoteDesktopLauncher(), store.Paths);
+        if (remoteDesktopLauncher == null) remoteDesktopLauncher = ownedDesktopLauncher = new WindowsRemoteDesktopLauncher();
+        remoteDesktop = new RdpLauncher(remoteDesktopLauncher, store.Paths);
         this.createTerminal = createTerminal ?? ((session, password, confirm) => TerminalConnectionFactory.Create(session, configuration, password, confirm));
         Text = "PortHarbor · 轻量连接工作台"; Size = new Size(1250, 820); MinimumSize = new Size(850, 560);
         StartPosition = FormStartPosition.CenterScreen; Font = new Font("Microsoft YaHei UI", 9); AutoScaleMode = AutoScaleMode.Dpi; BackColor = Color.White;
@@ -44,8 +49,10 @@ public sealed class MainForm : Form
         Item(sessionsMenu, "连接", ConnectSelected); Item(sessionsMenu, "编辑…", () => { if (Selected is { } session) Edit(session); }); Item(sessionsMenu, "删除会话及其密码…", Delete);
         var window = Menu("窗口"); Item(window, "关闭当前标签…", CloseTab);
         var settings = Menu("设置"); Item(settings, "主密码…", ConfigureMasterPassword);
+        Item(settings, "本地诊断设置…", () => DiagnosticDialogs.Settings(this, diagnosticLog));
         Item(settings, "打开配置目录", () => Process.Start(new ProcessStartInfo("explorer.exe", store.Paths.ConfigurationDirectory) { UseShellExecute = true }));
         var help = Menu("帮助");
+        Item(help, "预览并导出诊断包…", () => DiagnosticDialogs.Preview(this, diagnosticLog, this.filePicker));
         Item(help, "平台能力", () => MessageBox.Show(this,
             string.Join("\n\n", Enum.GetValues<PlatformCapability>().Select(c => PlatformCapabilityPresenter.Describe(c, this.capabilities.Get(c))))
                 + "\n\n运行支持可用不代表设备可访问或远程登录成功。", "平台能力", MessageBoxButtons.OK, MessageBoxIcon.Information));
@@ -71,7 +78,7 @@ public sealed class MainForm : Form
         context.Items.Add("编辑", null, (_, _) => { if (Selected is { } s) Guard(() => Edit(s)); });
         context.Items.Add("复制会话", null, (_, _) => { if (Selected is { } s) Guard(() => Edit(s with { Id = Guid.NewGuid(), Name = s.Name + " 副本", SavePassword = false })); });
         context.Items.Add("删除会话及其密码", null, (_, _) => Guard(Delete)); tree.ContextMenuStrip = context;
-        tabs.CloseRequested += async page => await CloseTab(page);
+        tabs.CloseRequested += page => BackgroundTask.Observe(CloseTab(page), ReportBackgroundFailure);
         RefreshTree(); Welcome();
         FormClosing += async (_, e) =>
         {
@@ -86,14 +93,35 @@ public sealed class MainForm : Form
                 var closing = tabs.TabPages.Cast<TabPage>().SelectMany(page => page.Controls.OfType<FileView>()).Select(files => files.CloseAsync())
                     .Concat(connections.Values.OfType<ITerminalSession>().Select(terminal => terminal.CloseAsync())).ToArray();
                 await Task.WhenAll(closing);
+                if (ownedDesktopLauncher != null) await ownedDesktopLauncher.DisposeAsync();
                 foreach (var connection in connections.Values.ToArray())
                     if (connection is not (FileView or ITerminalSession)) connection.Dispose();
                 configuration.LockVault();
                 closeReady = true;
                 Close();
             }
+            catch (Exception error) { ReportBackgroundFailure(error); }
             finally { shutdownPending = false; }
         };
+    }
+    void ReportBackgroundFailure(Exception error)
+    {
+        diagnosticLog.Write(new(Guid.Empty, Protocol.Shell, ConnectionState.Failed, ConnectionStage.Closing, ConnectionErrorPolicy.Classify(error, ConnectionStage.Closing), false, "Background task failed."));
+        if (!IsDisposed && IsHandleCreated)
+        {
+            try { BeginInvoke(() => { if (!IsDisposed) status.Text = "后台操作未完成，请查看本地诊断后重试。"; }); }
+            catch (InvalidOperationException) when (IsDisposed || !IsHandleCreated) { /* Form was disposed after the completion. */ }
+        }
+    }
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            if (ownedDesktopLauncher != null) BackgroundTask.Observe(ownedDesktopLauncher.DisposeAsync().AsTask());
+            diagnosticLog.Dispose();
+            tree.ImageList?.Dispose();
+        }
+        base.Dispose(disposing);
     }
     void Guard(Action action) { try { action(); } catch (Exception e) { MessageBox.Show(this, e.Message, "PortHarbor", MessageBoxButtons.OK, MessageBoxIcon.Error); } }
     Session? Selected => tree.SelectedNode?.Tag as Session;
@@ -103,6 +131,7 @@ public sealed class MainForm : Form
         string? selectedGroup = tree.SelectedNode?.Tag as string;
         string filter = search.Text.Trim();
         var savedSessions = configuration.GetSessions();
+        var library = SessionLibrary.Filter(configuration.GetGroups(), savedSessions, filter);
         tree.BeginUpdate(); tree.Nodes.Clear();
         var folders = new Dictionary<string, TreeNode>(StringComparer.OrdinalIgnoreCase);
         TreeNode Folder(string path)
@@ -116,14 +145,13 @@ public sealed class MainForm : Form
             if (string.Equals(path, selectedGroup, StringComparison.OrdinalIgnoreCase)) tree.SelectedNode = node;
             return node;
         }
-        foreach (string group in configuration.GetGroups().Concat(savedSessions.Select(s => string.IsNullOrWhiteSpace(s.Group) ? "默认" : s.Group)).Append("默认").Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(g => g))
+        foreach (string group in library.Groups)
         {
-            if (filter.Length == 0 || group.Contains(filter, StringComparison.OrdinalIgnoreCase)) Folder(group);
+            Folder(group);
         }
-        foreach (var session in savedSessions.OrderBy(s => s.Name))
+        foreach (var session in library.Sessions)
         {
-            string group = string.IsNullOrWhiteSpace(session.Group) ? "默认" : session.Group;
-            if (filter.Length > 0 && !$"{session.Name} {session.Host} {session.Protocol} {group}".Contains(filter, StringComparison.OrdinalIgnoreCase)) continue;
+            string group = SessionLibrary.Group(session);
             var node = Folder(group).Nodes.Add($"{session.Name}  ·  {session.Protocol}");
             node.Tag = session; node.ImageKey = node.SelectedImageKey = session.Protocol is Protocol.FTP or Protocol.SFTP ? "files" : session.Protocol == Protocol.RDP ? "desktop" : "terminal";
             node.ToolTipText = $"{session.Host}:{session.Port}";
@@ -221,7 +249,7 @@ public sealed class MainForm : Form
         if (!availability.IsAvailable) { ShowPlatformUnavailable(page, session, password, availability); return; }
         if (session.Protocol is Protocol.FTP or Protocol.SFTP)
         {
-            var files = new FileView(session, configuration, password, Confirm) { Dock = DockStyle.Fill }; connections[page] = files; page.Controls.Add(files);
+            var files = new FileView(session, configuration, password, Confirm) { Dock = DockStyle.Fill }; Action<ConnectionDiagnostic> fileLog = d => diagnosticLog.Write(d); files.Diagnostic += fileLog; page.Disposed += (_, _) => files.Diagnostic -= fileLog; connections[page] = files; page.Controls.Add(files);
         }
         else if (session.Protocol == Protocol.RDP)
         {
@@ -231,23 +259,32 @@ public sealed class MainForm : Form
         {
             var terminal = new TerminalView { Dock = DockStyle.Fill };
             var connectionStatus = new ConnectionStatusLabel { Dock = DockStyle.Bottom };
+            bool failureReported = false;
             var connection = createTerminal(session, password, Confirm); connections[page] = connection;
             connection.Diagnostic += OnDiagnostic;
-            page.Disposed += (_, _) => { connection.Diagnostic -= OnDiagnostic; connection.Output -= terminal.Append; };
+            Action<ConnectionDiagnostic> terminalLog = d => diagnosticLog.Write(d);
+            connection.Diagnostic += terminalLog;
+            page.Disposed += (_, _) => { connection.Diagnostic -= OnDiagnostic; connection.Diagnostic -= terminalLog; connection.Output -= terminal.Append; };
             connection.Output += terminal.Append; terminal.Input += connection.Send; terminal.TerminalResized += connection.Resize;
             page.Controls.Add(terminal); page.Controls.Add(connectionStatus); terminal.Focus();
-            _ = RunTerminal();
+            BackgroundTask.Observe(RunTerminal(), error =>
+            {
+                if (failureReported) return; // The session already published and logged its classified error.
+                var diagnostic = new ConnectionDiagnostic(connection.OperationId, session.Protocol, ConnectionState.Failed,
+                    ConnectionStage.None, ConnectionErrorCode.Unknown, false, "Terminal task failed.") { SessionId = session.Id };
+                diagnosticLog.Write(diagnostic);
+                connectionStatus.Report(diagnostic);
+            });
             void OnDiagnostic(ConnectionDiagnostic diagnostic)
             {
                 connectionStatus.Report(diagnostic);
                 if (diagnostic.State == ConnectionState.Failed)
+                {
+                    failureReported = true;
                     terminal.Append("\r\n\x1b[31m[" + DiagnosticPresenter.Error(diagnostic) + "]\x1b[0m\r\n");
+                }
             }
-            async Task RunTerminal()
-            {
-                try { await connection.Run(terminal.Screen.Columns, terminal.Screen.Rows); }
-                catch (Exception) { /* The diagnostic event has already presented the safe failure. */ }
-            }
+            async Task RunTerminal() => await connection.Run(terminal.Screen.Columns, terminal.Screen.Rows);
         }
     }
     void ShowPlatformUnavailable(TabPage page, Session session, string password, PlatformCapabilityStatus availability)
@@ -282,7 +319,7 @@ public sealed class MainForm : Form
         {
             var availability = platform.GetAvailability(Protocol.RDP);
             if (!availability.IsAvailable) { ShowPlatformUnavailable(page, s, password, availability); return; }
-            try { remoteDesktop.Launch(s, connectionStatus.Report); }
+            try { remoteDesktop.Launch(s, d => { diagnosticLog.Write(d); connectionStatus.Report(d); }); }
             catch (Exception) { /* Launch diagnostics remain on this page, including its retry button. */ }
         }
         var open = new Button { Text = "打开远程桌面", AutoSize = true }; open.Click += (_, _) => Launch(); panel.Controls.Add(open);
@@ -305,7 +342,8 @@ public sealed class MainForm : Form
     async void CloseTab()
     {
         if (tabs.SelectedTab is not { } page) return;
-        await CloseTab(page);
+        try { await CloseTab(page); }
+        catch (Exception error) { ReportBackgroundFailure(error); }
     }
     internal async Task CloseTab(TabPage page, Func<bool>? confirm = null)
     {
@@ -350,11 +388,6 @@ public sealed class MainForm : Form
         flow.Controls.Add(choices);
         flow.Controls.Add(new Label { Text = "从左侧会话库双击连接，或选择上方连接类型开始。\n\n保存密码需设置主密码；安装版另外使用 Windows 用户级加密。\n导出的会话不包含密码。Telnet 与普通 FTP 不加密流量。", AutoSize = true, ForeColor = Color.SlateGray, Margin = new Padding(0, 16, 0, 0) });
         page.Controls.Add(flow); tabs.TabPages.Add(page); tabs.SelectedTab = page;
-    }
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing) tree.ImageList?.Dispose();
-        base.Dispose(disposing);
     }
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {

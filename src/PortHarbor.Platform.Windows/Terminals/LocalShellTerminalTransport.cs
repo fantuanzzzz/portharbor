@@ -1,6 +1,6 @@
 namespace PortHarbor;
 
-internal sealed class LocalShellTerminalTransport(Session session) : StreamTerminalTransport
+internal sealed class LocalShellTerminalTransport(ShellProtocolConfiguration session) : StreamTerminalTransport
 {
     ConPty? pty;
     protected override Task OpenAsync(int columns, int rows, Action<ConnectionStage> reportStage, CancellationToken token)

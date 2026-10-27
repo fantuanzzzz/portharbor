@@ -10,6 +10,10 @@ public sealed class TerminalConnection : ITerminalSession
     readonly Session session;
     readonly ITerminalTransport transport;
     readonly Func<Exception, ConnectionStage, ConnectionErrorCode> classifyError;
+    readonly TimeSpan connectTimeout;
+    readonly TimeSpan writeTimeout;
+    readonly System.Diagnostics.Stopwatch elapsed = System.Diagnostics.Stopwatch.StartNew();
+    long received, sent, decodedCharacters;
     readonly CancellationTokenSource stop = new();
     readonly object gate = new();
     readonly Channel<Input> writes = Channel.CreateBounded<Input>(new BoundedChannelOptions(256)
@@ -24,11 +28,15 @@ public sealed class TerminalConnection : ITerminalSession
     public event Action<string>? Output;
 
     public TerminalConnection(Session session, ITerminalTransport transport,
-        Func<Exception, ConnectionStage, ConnectionErrorCode>? classifyError = null)
+        Func<Exception, ConnectionStage, ConnectionErrorCode>? classifyError = null,
+        TimeSpan? connectTimeout = null, TimeSpan? writeTimeout = null)
     {
         this.session = session with { };
         this.transport = transport ?? throw new ArgumentNullException(nameof(transport));
         this.classifyError = classifyError ?? ConnectionErrorPolicy.Classify;
+        this.connectTimeout = connectTimeout ?? TimeSpan.FromSeconds(15);
+        this.writeTimeout = writeTimeout ?? TimeSpan.FromSeconds(15);
+        if (this.connectTimeout <= TimeSpan.Zero || this.writeTimeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(connectTimeout));
     }
 
     public Task Run(int columns, int rows, CancellationToken token = default)
@@ -56,10 +64,17 @@ public sealed class TerminalConnection : ITerminalSession
             if (session.Protocol is not (Protocol.SSH or Protocol.Telnet or Protocol.Serial or Protocol.Shell))
                 throw new ArgumentException("The selected protocol is not a terminal protocol.");
             if (columns <= 0 || rows <= 0) throw new ArgumentOutOfRangeException(nameof(columns));
-            await transport.ConnectAsync(columns, rows, current =>
+            await TimeoutRunner.RunAsync(connectTimeout, linked.Token, async ct =>
             {
-                if (!linked.IsCancellationRequested) { stage = current; SetState(ConnectionState.Connecting, current); }
-            }, linked.Token).ConfigureAwait(false);
+                try
+                {
+                    await transport.ConnectAsync(columns, rows, current =>
+                    {
+                        if (!ct.IsCancellationRequested) { stage = current; SetState(ConnectionState.Connecting, current); }
+                    }, ct).ConfigureAwait(false);
+                }
+                catch (Exception) when (ct.IsCancellationRequested) { throw new OperationCanceledException(ct); }
+            }).ConfigureAwait(false);
             linked.Token.ThrowIfCancellationRequested();
             SetState(ConnectionState.Connected, ConnectionStage.None);
             writer = WriteLoopAsync(linked.Token, error =>
@@ -79,6 +94,8 @@ public sealed class TerminalConnection : ITerminalSession
                 if (count == 0) break;
                 linked.Token.ThrowIfCancellationRequested();
                 int decoded = decoder.GetChars(buffer, 0, count, chars, 0);
+                Interlocked.Add(ref received, count);
+                Interlocked.Add(ref decodedCharacters, decoded);
                 if (decoded > 0) Output?.Invoke(new string(chars, 0, decoded));
             }
         }
@@ -118,8 +135,22 @@ public sealed class TerminalConnection : ITerminalSession
             await foreach (var input in writes.Reader.ReadAllAsync(token).ConfigureAwait(false))
             {
                 token.ThrowIfCancellationRequested();
-                if (input.Bytes != null) await transport.WriteAsync(input.Bytes, token).ConfigureAwait(false);
-                else await transport.ResizeAsync(input.Columns, input.Rows, token).ConfigureAwait(false);
+                await TimeoutRunner.RunAsync(writeTimeout, token, async ct =>
+                {
+                    // A worker around a synchronous vendor API must be aborted when
+                    // its deadline expires, then awaited before releasing owners.
+                    using var interruption = ct.Register(transport.Abort);
+                    try
+                    {
+                        if (input.Bytes != null)
+                        {
+                            await transport.WriteAsync(input.Bytes, ct).ConfigureAwait(false);
+                            Interlocked.Add(ref sent, input.Bytes.Length);
+                        }
+                        else await transport.ResizeAsync(input.Columns, input.Rows, ct).ConfigureAwait(false);
+                    }
+                    catch (Exception) when (ct.IsCancellationRequested) { throw new OperationCanceledException(ct); }
+                }).ConfigureAwait(false);
             }
         }
         catch (Exception) when (token.IsCancellationRequested) { }
@@ -170,7 +201,7 @@ public sealed class TerminalConnection : ITerminalSession
         }
     }
 
-    public void Dispose() => _ = CloseAsync();
+    public void Dispose() => BackgroundTask.Observe(CloseAsync());
     public ValueTask DisposeAsync() => new(CloseAsync());
     void SetState(ConnectionState current, ConnectionStage stage)
     {
@@ -183,5 +214,11 @@ public sealed class TerminalConnection : ITerminalSession
         Publish(ConnectionState.Failed, stage, code, ConnectionErrorPolicy.IsRetryable(code), "Terminal connection failed.");
     }
     void Publish(ConnectionState current, ConnectionStage stage, ConnectionErrorCode code, bool retryable, string message)
-        => Diagnostic?.Invoke(new(OperationId, session.Protocol, current, stage, code, retryable, message));
+        => Diagnostic?.Invoke(new(OperationId, session.Protocol, current, stage, code, retryable, message)
+        {
+            SessionId = session.Id, DurationMs = elapsed.ElapsedMilliseconds,
+            TimeoutMs = (long)(stage == ConnectionStage.Writing ? writeTimeout : connectTimeout).TotalMilliseconds,
+            BytesSent = Interlocked.Read(ref sent), BytesReceived = Interlocked.Read(ref received),
+            CharactersDecoded = Interlocked.Read(ref decodedCharacters)
+        });
 }

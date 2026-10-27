@@ -14,7 +14,8 @@ internal static class TerminalSessionChecks
             "terminal lifecycle lives in Application without UI, platform or vendor dependencies");
 
         var ordered = new ScriptedTerminalTransport();
-        await using (var terminal = new TerminalConnection(Options, ordered))
+        var orderedOptions = Options;
+        await using (var terminal = new TerminalConnection(orderedOptions, ordered))
         {
             var diagnostics = new System.Collections.Concurrent.ConcurrentQueue<ConnectionDiagnostic>();
             terminal.Diagnostic += diagnostics.Enqueue;
@@ -39,6 +40,9 @@ internal static class TerminalSessionChecks
             ordered.Incoming.Writer.TryComplete();
             await run.WaitAsync(Deadline);
             await terminal.CloseAsync(); await terminal.CloseAsync();
+            check(diagnostics.Last() is { BytesSent: 3, BytesReceived: 6, CharactersDecoded: 2, DurationMs: >= 0 }
+                && diagnostics.Last().SessionId == orderedOptions.Id,
+                "terminal diagnostics report actual sent/received byte and decoded character counts without output contents");
             terminal.Send([68]);
             check(terminal.State == ConnectionState.Closed && ordered.DisposeCalls == 1 && ordered.Written.Count == 3,
                 "peer EOF completes cleanup once and closed terminals reject further input");
@@ -47,6 +51,32 @@ internal static class TerminalSessionChecks
         }
 
         var cancelled = new ScriptedTerminalTransport();
+        var timedConnect = new ScriptedTerminalTransport { BlockConnect = true };
+        await using (var terminal = new TerminalConnection(Options, timedConnect, connectTimeout: TimeSpan.FromMilliseconds(150)))
+        {
+            var diagnostics = new System.Collections.Concurrent.ConcurrentQueue<ConnectionDiagnostic>(); terminal.Diagnostic += diagnostics.Enqueue;
+            bool timedOut = false;
+            try { await terminal.Run(80, 24).WaitAsync(Deadline); } catch (TimeoutException) { timedOut = true; }
+            check(timedOut && terminal.State == ConnectionState.Closed && timedConnect.DisposeCalls == 1
+                && diagnostics.Any(d => d.ErrorCode == ConnectionErrorCode.Timeout && d.Stage == ConnectionStage.Authenticating),
+                "terminal startup deadline reports timeout at the active stage and awaits transport cleanup");
+        }
+        var timedWrite = new ScriptedTerminalTransport { BlockWrite = true };
+        await using (var terminal = new TerminalConnection(Options, timedWrite, writeTimeout: TimeSpan.FromMilliseconds(150)))
+        {
+            var diagnostics = new System.Collections.Concurrent.ConcurrentQueue<ConnectionDiagnostic>(); terminal.Diagnostic += diagnostics.Enqueue;
+            Task run = terminal.Run(80, 24);
+            await timedWrite.ReadStarted.Task.WaitAsync(Deadline); terminal.Send([65]);
+            await timedWrite.WriteStarted.Task.WaitAsync(Deadline);
+            await timedWrite.Aborted.Task.WaitAsync(Deadline);
+            bool waited = !run.IsCompleted && timedWrite.DisposeCalls == 0;
+            timedWrite.WriteRelease.TrySetResult();
+            bool timedOut = false;
+            try { await run.WaitAsync(Deadline); } catch (TimeoutException) { timedOut = true; }
+            check(waited && timedOut && !timedWrite.DisposedDuringIo && terminal.State == ConnectionState.Closed
+                && diagnostics.Any(d => d.ErrorCode == ConnectionErrorCode.Timeout && d.Stage == ConnectionStage.Writing),
+                "terminal write deadline aborts blocking I/O and waits for the worker before releasing resources");
+        }
         await using (var terminal = new TerminalConnection(Options, cancelled))
         {
             using var token = new CancellationTokenSource(); token.Cancel();

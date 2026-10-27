@@ -14,6 +14,7 @@ public sealed class FileView : UserControl
     CancellationTokenSource? taskStop;
     TaskCompletionSource? operationFinished;
     bool busy, connected, closing;
+    internal event Action<ConnectionDiagnostic>? Diagnostic;
     public FileView(Session s, IHostKeyTrust hostKeyTrust, string password, Func<string, bool> confirm, IFilePicker? filePicker = null)
         : this(FileTransferFactory.Create(s, hostKeyTrust, password, confirm), s.RemotePath, filePicker) { }
 
@@ -39,8 +40,13 @@ public sealed class FileView : UserControl
     public static string Join(string directory, string name) => directory.TrimEnd('/') + "/" + name;
     static string ParentPath(string value) { var p = value.TrimEnd('/'); int at = p.LastIndexOf('/'); return at <= 0 ? "/" : p[..at]; }
     static bool ValidName(string name) => name.Length > 0 && name is not ("." or "..") && !name.Any(c => c is '/' or '\\' || char.IsControl(c));
-    void SetStatus(string text) { if (!IsDisposed && IsHandleCreated && !closing) BeginInvoke(() => status.Text = text); }
-    void OnDiagnostic(ConnectionDiagnostic diagnostic) { SetStatus(DiagnosticPresenter.Status(diagnostic)); }
+    void SetStatus(string text)
+    {
+        if (IsDisposed || !IsHandleCreated || closing) return;
+        try { BeginInvoke(() => { if (!IsDisposed && !closing) status.Text = text; }); }
+        catch (InvalidOperationException) when (IsDisposed || !IsHandleCreated || closing) { /* Late completion after view shutdown. */ }
+    }
+    void OnDiagnostic(ConnectionDiagnostic diagnostic) { Diagnostic?.Invoke(diagnostic); SetStatus(DiagnosticPresenter.Status(diagnostic)); }
     async Task Work(Func<CancellationToken, Task> operation)
     {
         if (busy || closing) return;
@@ -131,7 +137,7 @@ public sealed class FileView : UserControl
             closing = true;
             taskStop?.Cancel();
             connection.Diagnostic -= OnDiagnostic;
-            if (!busy) _ = connection.DisposeAsync();
+            if (!busy) BackgroundTask.Observe(connection.DisposeAsync().AsTask());
         }
         base.Dispose(disposing);
     }

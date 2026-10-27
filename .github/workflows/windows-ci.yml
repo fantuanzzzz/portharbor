@@ -32,6 +32,8 @@ jobs:
         run: dotnet restore tests/PortHarbor.Checks/PortHarbor.Checks.csproj --runtime win-x64 --configfile NuGet.Config --locked-mode
       - name: Check diff whitespace
         run: git diff --check
+      - name: Publication rollback fault injection
+        run: .\tests\build-rollback.ps1 -OutputDirectory artifacts\rollback-validation
       - name: Build Release
         run: dotnet build tests/PortHarbor.Checks/PortHarbor.Checks.csproj -c Release --no-restore
       - name: Fast core checks

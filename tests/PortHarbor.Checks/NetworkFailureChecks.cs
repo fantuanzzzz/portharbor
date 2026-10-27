@@ -49,6 +49,54 @@ internal static partial class Program
         }
 
         using var config = System.Text.Json.JsonDocument.Parse(File.ReadAllText(configPath));
+        int stalledPort = config.RootElement.GetProperty("stalledPort").GetInt32();
+        using (var store = new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root, "silent-shell-channel"), false)))
+        {
+            var session = new Session { Protocol = Protocol.SSH, Host = "127.0.0.1", Port = config.RootElement.GetProperty("sftpPort").GetInt32(), Username = "stallchannel" };
+            await using var terminal = new TerminalConnection(session, TerminalTransportFactory.Create(session, store, "easytest-only", _ => true),
+                DiagnosticClassifier.Classify, connectTimeout: TimeSpan.FromSeconds(2));
+            var events = new ConcurrentQueue<ConnectionDiagnostic>(); terminal.Diagnostic += events.Enqueue;
+            Exception? failure = null; var elapsed = System.Diagnostics.Stopwatch.StartNew();
+            try { await terminal.Run(80, 24).WaitAsync(TimeSpan.FromSeconds(8)); }
+            catch (TimeoutException error) { failure = error; }
+            await terminal.CloseAsync().WaitAsync(NetworkDeadline);
+            Check(File.Exists(Path.Combine(Path.GetDirectoryName(configPath)!, "shell-channel-stalled"))
+                && failure != null && elapsed.Elapsed < TimeSpan.FromSeconds(8) && terminal.State == ConnectionState.Closed
+                && events.Any(e => e.Stage == ConnectionStage.OpeningChannel && e.ErrorCode == ConnectionErrorCode.Timeout),
+                "synchronous SSH shell-channel creation is interrupted by its connect deadline and releases the client");
+        }
+        using (var store = new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root, "silent-ssh"), false)))
+        {
+            await using var files = FileTransferFactory.Create(
+                new Session { Protocol = Protocol.SFTP, Host = "127.0.0.1", Port = stalledPort, Username = "easytest" }, store, "easytest-only", _ => true);
+            var events = new ConcurrentQueue<ConnectionDiagnostic>(); files.Diagnostic += events.Enqueue;
+            Exception? failure = null; var elapsed = System.Diagnostics.Stopwatch.StartNew();
+            try { await files.ConnectAsync(CancellationToken.None, TimeSpan.FromSeconds(2)); }
+            catch (TimeoutException error) { failure = error; }
+            await files.DisposeAsync().AsTask().WaitAsync(NetworkDeadline); elapsed.Stop();
+            Check(failure is TimeoutException && elapsed.Elapsed < TimeSpan.FromSeconds(5)
+                && events.Any(e => e.State == ConnectionState.Failed && e.Stage == ConnectionStage.Connecting && e.ErrorCode == ConnectionErrorCode.Timeout)
+                && files.State == ConnectionState.Closed,
+                "silent SSH peer is cancelled by the configured connect timeout and closed promptly");
+        }
+
+        using (var store = new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root, "dns-host-not-found"), false)))
+        {
+            string unresolvedHost = "portharbor-" + Guid.NewGuid().ToString("N") + ".invalid";
+            await using var files = FileTransferFactory.Create(
+                new Session { Protocol = Protocol.SFTP, Host = unresolvedHost, Port = 22, Username = "easytest" }, store, "easytest-only", _ => true);
+            var events = new ConcurrentQueue<ConnectionDiagnostic>(); files.Diagnostic += events.Enqueue;
+            Exception? failure = null;
+            try { await files.ConnectAsync(CancellationToken.None, NetworkDeadline); }
+            catch (TimeoutException) { throw; }
+            catch (Exception observed) { failure = observed; }
+            Check(failure != null && events.Any(e => e.State == ConnectionState.Failed && e.Stage == ConnectionStage.Connecting
+                    && e.ErrorCode == ConnectionErrorCode.NetworkUnavailable && e.Retryable)
+                && events.Last().State == ConnectionState.Closed
+                && !DiagnosticPresenter.Error(events.First(e => e.State == ConnectionState.Failed)).Contains(unresolvedHost),
+                "real unresolved .invalid hostname reports a safe network failure and releases the SFTP client");
+        }
+
         using (var store = new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root, "ftp-refused-password"), false)))
         {
             await using var ftp = FileTransferFactory.Create(

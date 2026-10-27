@@ -115,6 +115,31 @@ internal static partial class Program
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         while (File.Exists(path)) await Task.Delay(20, deadline.Token);
         Check(!Directory.EnumerateFiles(directory).Any(), "Windows RDP removes its temporary configuration when the owned client process exits");
+
+        int processId = 0;
+        await using var observing = new WindowsRemoteDesktopLauncher(_ =>
+        {
+            var info = new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe"))
+                { UseShellExecute = false, CreateNoWindow = true };
+            info.ArgumentList.Add("/c"); info.ArgumentList.Add("ping -n 20 127.0.0.1 > nul");
+            var child = Process.Start(info)!; processId = child.Id; return child;
+        });
+        observing.Launch(RdpLauncher.Configuration(session with { Protocol = Protocol.RDP }), directory, _ => { });
+        try
+        {
+            await observing.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+            using var external = Process.GetProcessById(processId);
+            Check(observing.CleanupCompletion.IsCompletedSuccessfully && !external.HasExited && !Directory.EnumerateFiles(directory).Any(),
+                "disposing the RDP launcher awaits watcher cleanup and removes temporary files without terminating the external client");
+            Check(Throws<ObjectDisposedException>(() => observing.Launch("", directory, _ => { })),
+                "a disposed RDP launcher refuses new client launches");
+        }
+        finally
+        {
+            // Only the test owns this stand-in process; the application never kills mstsc.
+            using var child = Process.GetProcessById(processId);
+            if (!child.HasExited) { child.Kill(entireProcessTree: true); await child.WaitForExitAsync(); }
+        }
     }
 
     sealed class UnavailableSecretProtector : ISecretProtector

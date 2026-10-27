@@ -26,7 +26,12 @@ public sealed class ConPty : IDisposable
     IntPtr console, process;
     readonly object consoleGate = new();
     int disposed;
+    Task exitMonitor = Task.CompletedTask;
+    internal Task Completion => exitMonitor;
     public ConPty(Session session, int columns, int rows)
+        : this((ShellProtocolConfiguration)session.ProtocolConfiguration, columns, rows) { }
+
+    public ConPty(ShellProtocolConfiguration session, int columns, int rows)
     {
         IntPtr inputRead = IntPtr.Zero, inputWrite = IntPtr.Zero, outputRead = IntPtr.Zero, outputWrite = IntPtr.Zero, attributes = IntPtr.Zero;
         bool initialized = false;
@@ -52,7 +57,12 @@ public sealed class ConPty : IDisposable
             Input = new FileStream(new SafeFileHandle(inputWrite, true), FileAccess.Write, 4096, false); inputWrite = IntPtr.Zero;
             Output = new FileStream(new SafeFileHandle(outputRead, true), FileAccess.Read, 4096, false); outputRead = IntPtr.Zero;
             var child = System.Diagnostics.Process.GetProcessById((int)info.ProcessId);
-            _ = Task.Run(async () => { using (child) { await child.WaitForExitAsync(); CloseConsole(); } });
+            exitMonitor = Task.Run(async () =>
+            {
+                try { await child.WaitForExitAsync().ConfigureAwait(false); }
+                finally { child.Dispose(); CloseConsole(); }
+            });
+            BackgroundTask.Observe(exitMonitor);
         }
         catch { Dispose(); throw; }
         finally
@@ -71,5 +81,10 @@ public sealed class ConPty : IDisposable
         Input?.Dispose();
         CloseConsole();
         Output?.Dispose();
+        // Termination and pipe release precede waiting for the owned watcher.
+        // The monitor never invokes Dispose and therefore cannot await itself.
+        try { exitMonitor.GetAwaiter().GetResult(); }
+        catch (InvalidOperationException) { /* Process already exited; native resources are closed. */ }
+        catch (Win32Exception) { /* Wait could not inspect the terminated child. */ }
     }
 }

@@ -15,6 +15,12 @@ public sealed class FileConnection : IFileTransfer
     bool disposeRequested;
     bool disposed;
     ConnectionStage connectingStage = ConnectionStage.Connecting;
+    readonly Guid? sessionId;
+    readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+    long transferred;
+    long? totalBytes;
+    TransferRecoveryState recovery;
+    TimeSpan currentTimeout;
 
     public Guid OperationId { get; } = Guid.NewGuid();
     public ConnectionState State { get; private set; } = ConnectionState.Created;
@@ -23,18 +29,20 @@ public sealed class FileConnection : IFileTransfer
     readonly Func<Exception, ConnectionStage, ConnectionErrorCode> classifyError;
 
     public FileConnection(Protocol protocol, IRemoteFileSystem remote,
-        Func<Exception, ConnectionStage, ConnectionErrorCode>? classifyError = null)
+        Func<Exception, ConnectionStage, ConnectionErrorCode>? classifyError = null, Guid? sessionId = null)
     {
         if (protocol is not (Protocol.FTP or Protocol.SFTP)) throw new ArgumentException("File transfers require FTP or SFTP.", nameof(protocol));
         this.protocol = protocol;
         this.remote = remote ?? throw new ArgumentNullException(nameof(remote));
         this.classifyError = classifyError ?? ConnectionErrorPolicy.Classify;
+        this.sessionId = sessionId;
     }
 
     public async Task ConnectAsync(CancellationToken token, TimeSpan timeout)
     {
         ThrowIfDisposalRequested();
         if (State == ConnectionState.Connected) return;
+        currentTimeout = timeout;
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, lifetime.Token);
         bool enteredConnectionAttempt = false;
         try
@@ -60,11 +68,16 @@ public sealed class FileConnection : IFileTransfer
                     }
                     catch (Exception error)
                     {
-                        var code = classifyError(error, connectingStage);
+                        // Classify the operation deadline before cleanup, while retaining
+                        // the gate so a queued request cannot race disposal of this client.
+                        Exception failure = error is OperationCanceledException && !linked.IsCancellationRequested && ct.IsCancellationRequested
+                            ? new TimeoutException("The file connection exceeded its configured timeout.", error) : error;
+                        var code = classifyError(failure, connectingStage);
                         SetState(ConnectionState.Failed, connectingStage, code, ConnectionErrorPolicy.IsRetryable(code), "File connection failed.");
                         try { await remote.DisposeAsync().ConfigureAwait(false); }
-                        catch { }
+                        catch { /* Preserve the connect error; the adapter has been asked to release its owners. */ }
                         SetState(ConnectionState.Closed, ConnectionStage.Closing, code, false, "Closed.");
+                        System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
                         throw;
                     }
                     return true;
@@ -127,7 +140,7 @@ public sealed class FileConnection : IFileTransfer
             }
             finally
             {
-                if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+                if (File.Exists(temporaryPath)) { File.Delete(temporaryPath); recovery = TransferRecoveryState.LocalStagingRemoved; }
             }
             return true;
         });
@@ -146,8 +159,10 @@ public sealed class FileConnection : IFileTransfer
                     await CopyAsync(source, destination, TransferDirection.Upload, sourceInfo.Length, ct, progress).ConfigureAwait(false);
                 await remote.CompleteWriteAsync(ct).ConfigureAwait(false);
                 ct.ThrowIfCancellationRequested();
+                recovery = TransferRecoveryState.RemoteCommitUnconfirmed;
                 await remote.CommitUploadAsync(temporaryPath, remotePath, ct).ConfigureAwait(false);
                 committed = true;
+                recovery = TransferRecoveryState.None;
             }
             finally
             {
@@ -156,8 +171,9 @@ public sealed class FileConnection : IFileTransfer
             return true;
         });
 
-    static async Task CopyAsync(Stream source, Stream destination, TransferDirection direction, long? total, CancellationToken token, IProgress<TransferProgress>? progress)
+    async Task CopyAsync(Stream source, Stream destination, TransferDirection direction, long? total, CancellationToken token, IProgress<TransferProgress>? progress)
     {
+        totalBytes = total;
         var buffer = new byte[65536];
         long transferred = 0;
         long lastReported = -1;
@@ -171,6 +187,7 @@ public sealed class FileConnection : IFileTransfer
                 throw new IOException("The transfer exceeded its expected byte count.");
             await destination.WriteAsync(buffer.AsMemory(0, count), token).ConfigureAwait(false);
             transferred += count;
+            this.transferred = transferred;
             if (lastReported < 0 || transferred - lastReported >= 4 * 1024 * 1024 || reportClock.Elapsed >= TimeSpan.FromMilliseconds(100))
             {
                 progress?.Report(new TransferProgress(direction, transferred, total));
@@ -187,18 +204,21 @@ public sealed class FileConnection : IFileTransfer
     async Task TryCleanupRemoteAsync(string temporaryPath)
     {
         using var cleanup = new CancellationTokenSource(CleanupTimeout);
+        bool uncertainCommit = recovery == TransferRecoveryState.RemoteCommitUnconfirmed;
         try
         {
             if (await remote.ExistsAsync(temporaryPath, cleanup.Token).ConfigureAwait(false))
                 await remote.DeleteFileAsync(temporaryPath, cleanup.Token).ConfigureAwait(false);
+            if (!uncertainCommit) recovery = TransferRecoveryState.RemoteStagingRemoved;
         }
-        catch { }
+        catch { if (!uncertainCommit) recovery = TransferRecoveryState.RemoteCleanupUnconfirmed; }
     }
 
     async Task<T> ExecuteAsync<T>(ConnectionStage stage, string message, TimeSpan timeout, CancellationToken token, Func<CancellationToken, Task<T>> action)
     {
         ThrowIfDisposalRequested();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, lifetime.Token);
+        bool entered = false;
         try
         {
             return await TimeoutRunner.RunAsync(timeout, linked.Token, async ct =>
@@ -208,7 +228,22 @@ public sealed class FileConnection : IFileTransfer
                 {
                     ThrowIfDisposalRequested();
                     if (State != ConnectionState.Connected) throw new InvalidOperationException("文件连接尚未建立。");
-                    return await action(ct).ConfigureAwait(false);
+                    entered = true;
+                    currentTimeout = timeout; transferred = 0; totalBytes = null; recovery = TransferRecoveryState.None;
+                    var duration = System.Diagnostics.Stopwatch.StartNew();
+                    try
+                    {
+                        var result = await action(ct).ConfigureAwait(false);
+                        Diagnostic?.Invoke(Enrich(new(OperationId, protocol, State, stage, ConnectionErrorCode.None, false, "File operation completed."), duration.ElapsedMilliseconds));
+                        return result;
+                    }
+                    catch (Exception error)
+                    {
+                        var code = error is OperationCanceledException && !linked.IsCancellationRequested && ct.IsCancellationRequested
+                            ? ConnectionErrorCode.Timeout : classifyError(error, stage);
+                        Diagnostic?.Invoke(Enrich(new(OperationId, protocol, State, stage, code, ConnectionErrorPolicy.IsRetryable(code), message), duration.ElapsedMilliseconds));
+                        throw;
+                    }
                 }
                 finally { operationGate.Release(); }
             }).ConfigureAwait(false);
@@ -216,7 +251,7 @@ public sealed class FileConnection : IFileTransfer
         catch (Exception error)
         {
             var code = classifyError(error, stage);
-            Diagnostic?.Invoke(new ConnectionDiagnostic(OperationId, protocol, State, stage, code, ConnectionErrorPolicy.IsRetryable(code), message));
+            if (!entered) Diagnostic?.Invoke(Enrich(new(OperationId, protocol, State, stage, code, ConnectionErrorPolicy.IsRetryable(code), message)));
             throw;
         }
     }
@@ -264,6 +299,12 @@ public sealed class FileConnection : IFileTransfer
     void SetState(ConnectionState state, ConnectionStage stage, ConnectionErrorCode code, bool retryable, string message)
     {
         State = state;
-        Diagnostic?.Invoke(new ConnectionDiagnostic(OperationId, protocol, state, stage, code, retryable, message));
+        Diagnostic?.Invoke(Enrich(new(OperationId, protocol, state, stage, code, retryable, message)));
     }
+
+    ConnectionDiagnostic Enrich(ConnectionDiagnostic d, long? duration = null) => d with
+    {
+        SessionId = sessionId, DurationMs = duration ?? clock.ElapsedMilliseconds,
+        TimeoutMs = (long)currentTimeout.TotalMilliseconds, BytesTransferred = transferred, TotalBytes = totalBytes, Recovery = recovery
+    };
 }

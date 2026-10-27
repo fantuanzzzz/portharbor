@@ -38,4 +38,17 @@ public sealed record ConnectionDiagnostic(
     ConnectionStage Stage,
     ConnectionErrorCode ErrorCode,
     bool Retryable,
-    string Message);
+    string Message)
+{
+    public Guid? SessionId { get; init; }
+    public long? DurationMs { get; init; }
+    public long? TimeoutMs { get; init; }
+    public long? BytesTransferred { get; init; }
+    public long? TotalBytes { get; init; }
+    public long? BytesSent { get; init; }
+    public long? BytesReceived { get; init; }
+    public long? CharactersDecoded { get; init; }
+    public TransferRecoveryState Recovery { get; init; }
+}
+
+public enum TransferRecoveryState { None, LocalStagingRemoved, RemoteCleanupUnconfirmed, RemoteStagingRemoved, RemoteCommitUnconfirmed }
