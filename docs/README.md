@@ -26,6 +26,8 @@
 
 ## 当前快照
 
+2026-10-27 收工点：功能提交 `16c5fa2`，T1–T5 软件收尾完成，下一轮产品体验开发尚未开始。本次仅整理文档、未执行 GitHub 推送；报告、产物位置和下次起点见[开发日志的收工记录](DEVELOPMENT-LOG.md#2026-10-27---收工记录)。
+
 截至 2026-10-27，项目是 Windows 专用的 .NET 8 / WinForms 私有预览版。Domain、Application、Infrastructure、Windows 平台和 UI 的依赖方向已经建立；DPAPI、mstsc、ConPTY、串口、平台能力、应用数据路径和文件选择均有明确边界。Windows Forms 文件选择器单独成项目，既有平台库继续不引用 WinForms。
 
 导入导出业务策略已迁入 Application；分类合并、新 ID 分配及敏感字段排除可脱离 Windows 检查，存储适配器保留原格式与原子保存。
