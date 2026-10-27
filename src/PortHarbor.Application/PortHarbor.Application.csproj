@@ -6,5 +6,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../PortHarbor.Domain/PortHarbor.Domain.csproj" />
+    <EmbeddedResource Update="Resources/DiagnosticMessages.resx" LogicalName="PortHarbor.Resources.DiagnosticMessages.resources" />
   </ItemGroup>
 </Project>

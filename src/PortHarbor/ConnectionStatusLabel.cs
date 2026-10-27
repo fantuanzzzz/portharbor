@@ -12,7 +12,7 @@ internal sealed class ConnectionStatusLabel : Label
         Height = 30;
         TextAlign = ContentAlignment.MiddleLeft;
         Padding = new Padding(8, 0, 0, 0);
-        Text = "准备连接";
+        Text = DiagnosticMessageCatalog.ReadyToConnect;
     }
 
     public void Report(ConnectionDiagnostic diagnostic)

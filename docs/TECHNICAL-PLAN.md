@@ -33,14 +33,14 @@ PortHarbor 当前是 Windows 桌面连接工作台，提供 SSH、Telnet、RDP�
 | 领域 | 当前情况 | 对规划的影响 |
 | --- | --- | --- |
 | 桌面 UI | `PortHarbor` 是 `net8.0-windows` WinForms 组合根；`MainForm` 负责导航、视图和平台服务装配 | 保留 WinForms 作为当前壳；连接生命周期、存储和平台调用通过 Application/平台端口进入 |
-| 会话与存储 | Domain 保存会话/协议模型；Application 提供会话与配置用例；Infrastructure 负责 JSON/INI、schema v1/v2、备份、迁移和主机信任 | 保持 v1/v2 与安装/便携配置兼容，继续抽取导入导出业务策略 |
+| 会话与存储 | Application 提供会话、配置及导入导出策略；Infrastructure 负责 JSON/INI、schema v1/v2、备份、迁移和主机信任 | 保持 v1/v2 与安装/便携配置兼容，导入通过最新快照单次保存和失败回滚 |
 | 终端会话 | Application 的 `TerminalConnection` 管理统一终端生命周期、I/O 队列、取消和资源释放；SSH/Telnet 在 Infrastructure，Shell/Serial/ConPTY 在 Windows 平台 | 继续完善剩余协议实机验证和平台边界 |
 | 文件传输 | Application 的 `FileConnection` 管理取消、超时、临时文件和覆盖策略；FTP/SFTP 由 Infrastructure 适配 | 当前契约见 [文件传输约定](FILE-TRANSFER.md)，实现保持异步操作和失败清理 |
 | 终端显示 | Domain 的 `TerminalScreen` 保存解析状态，WinForms `TerminalView` 负责绘制 | 保持解析器无 UI 依赖，后续再评估成熟终端引擎 |
-| Windows 边界 | `WindowsSecretProtector`、`WindowsRemoteDesktopLauncher`、`WindowsPlatformCapabilities`、`WindowsAppDataPaths` 和 ConPTY 位于 Windows 平台项目 | 保留 DPAPI/便携密码库、mstsc、路径迁移和能力检测兼容；文件选择器仍待迁移 |
+| Windows 边界 | DPAPI、mstsc、能力、路径和 ConPTY 位于 Windows 平台项目；文件对话框位于独立的 Windows Forms 平台项目 | 保留现有用户交互与数据兼容，Application 文件选择端口不依赖 UI |
 | 依赖与构建 | SSH.NET、FluentFTP、System.IO.Ports；锁定 NuGet 依赖；默认生成不含 .NET 环境的框架依赖 x64 ZIP，`-IncludeRuntime` 可选生成自包含包 | 保留锁文件；CI 与本地脚本调用同一组可复现命令；发布目录使用暂存后提交 |
 | 测试 | Application 检查、核心 Windows 检查、WinForms/ConPTY 检查和本机 Python 协议回环均由 `PortHarbor.Checks` 分层入口执行 | 继续保持快速检查、Windows 系统检查、协议端到端和发布冒烟分层 |
-| 工程自动化 | 已有 Windows CI 工作流和分层检查入口；应用仍是单个 WinForms 项目 | 继续补齐工程基线验收，逐步抽取项目边界 |
+| 工程自动化 | 已有 Windows CI 工作流和分层检查入口；WinForms 界面、应用用例和平台/协议适配器已分项目 | 继续补齐工程基线验收及未完成的业务边界 |
 
 当前依据来自 [README](../README.md)、[开发日志](DEVELOPMENT-LOG.md)、[PortHarbor.csproj](../src/PortHarbor/PortHarbor.csproj)、[build.ps1](../build.ps1)、Domain/Application/Infrastructure/Platform.Windows 项目及 `MainForm.cs`。早期单体文件名只保留在历史日志中，不作为当前源码路径；方案中的完成状态以当前工作区和验证报告为准。
 
@@ -80,7 +80,8 @@ src/
   PortHarbor.Domain/             会话、协议配置、校验、传输状态和无 UI 的终端模型
   PortHarbor.Application/        创建/编辑/连接/断开/导入导出/传输等用例和端口
   PortHarbor.Infrastructure/     JSON、SSH.NET、FluentFTP、串口和日志实现
-  PortHarbor.Platform.Windows/   DPAPI、ConPTY、mstsc、Windows 文件选择器等实现
+  PortHarbor.Platform.Windows/   DPAPI、ConPTY、mstsc、能力与路径等实现
+  PortHarbor.Platform.Windows.Forms/ Windows Forms 文件选择器适配
   PortHarbor.App.Windows/        WinForms 组合根、窗体、控件和 UI 线程适配
 tests/
   PortHarbor.UnitTests/          不启动窗体、不访问外网的快速测试
@@ -96,7 +97,7 @@ tests/
 
 - 把当前包含全部协议字段的 `Session` 逐步拆为公共会话元数据和按协议区分的配置。协议配置使用显式类型或判别联合，避免 FTP 的 TLS 字段、Shell 的工作目录等无关字段散落在同一对象。
 - 在 UI 和持久化入口进行输入校验；领域模型提供无控件依赖的规则和清晰错误。协议端口、主机名、串口参数、RDP 地址等规则必须有边界测试。
-- 为数据契约保留 `SchemaVersion`，用有序迁移 `v1 -> v2 -> ...` 升级配置；迁移失败时保留原文件并报告旧版/新版路径、版本和修复建议。导入导出使用单独 DTO，默认不包含密码和 SSH 主机信任记录。
+- 为数据契约保留 `SchemaVersion`，用有序迁移 `v1 -> v2 -> ...` 升级配置；迁移失败时保留原文件并报告旧版/新版路径、版本和修复建议。导入导出使用单独 DTO，默认不包含密码和 SSH 主机信任记录。当前规则与存储事务见[会话配置导入导出约定](CONFIGURATION-TRANSFER.md)及 [ADR 0007](adr/0007-configuration-transfer-policy.md)。
 - 保持已发布用户数据兼容。改字段名、协议编码或凭据格式前，先增加迁移测试和旧样本 fixture；不得把当前的用户级 DPAPI 密文当成可移植凭据。
 
 ### 4.2 连接端口
@@ -118,6 +119,7 @@ tests/
 - `IRemoteDesktopLauncher`：Windows 可使用 mstsc；其他平台若无等价系统客户端则显示能力不支持或提供明确配置的外部客户端。
 - `IPlatformCapabilities`：报告可用能力及原因，例如 DPAPI、串口、PTY、RDP 外部客户端；UI 据此禁用或解释不可用功能。
 - `IAppDataPaths`：提供配置、缓存、日志和临时文件目录。路径策略和权限在各平台实现，不让业务代码直接依赖 `LocalApplicationData`、`explorer.exe` 或平台目录格式。
+- `IFilePicker`：同步单文件打开/保存，传递过滤器、建议文件名与选中路径，取消返回 `null`；Windows Forms 适配器持有模态 owner，业务端口不暴露窗口类型。
 
 平台能力不是二元的“可移植/不可移植”。每项功能应记录支持状态、降级状态和验证平台。文件会话可以跨平台迁移，DPAPI 密码密文、Windows Shell 命令和 mstsc 参数则不能假设可迁移。
 
@@ -177,14 +179,14 @@ tests/
 
 ## 8. 分阶段实施
 
-进度核对日期：2026-10-26。依据当前源码、构建脚本、CI 工作流及开发日志中的验证记录。
+进度核对日期：2026-10-27。依据当前源码、构建脚本、CI 工作流及开发日志中的验证记录。
 
 | 阶段 | 状态 | 当前结论 |
 | --- | --- | --- |
 | 0：工程基线 | 进行中 | 已有检查分层、CI、锁定恢复、差异空白检查及发布冒烟/回滚验证，干净 checkout 与耗时基线仍待验收 |
 | 1：诊断与稳健性 | 进行中 | 文件传输已异步化并有取消/超时/关闭测试；其余协议诊断和后台生命周期仍待完善 |
-| 2：稳定内核 | 进行中 | Domain/Application 承载会话、配置、文件传输和终端编排；存储及网络适配器在 Infrastructure，导入导出业务策略及其余纯逻辑待完善 |
-| 3：协议与平台隔离 | 部分提前完成 | 文件传输、SSH/Telnet 已分层；Windows 平台实现、能力报告和应用数据路径已接入，文件选择器待实施 |
+| 2：稳定内核 | 进行中 | Domain/Application 承载会话、配置、导入导出、文件传输和终端编排；存储及网络适配器在 Infrastructure，其余纯逻辑仍待梳理 |
+| 3：协议与平台隔离 | 部分提前完成 | 文件传输、SSH/Telnet 已分层；Windows 平台实现、能力、路径及文件选择端口已接入，真实设备/远程登录验收仍待完成 |
 | 4：新平台或 UI | 未开始（按需求启动） | 尚未选择目标平台与能力范围 |
 
 维护规则：`[x]` 仅表示该子任务已完成，`[ ]` 表示未完成或尚未验证。部分完成的任务应拆成可独立核验的子项。每次开发结束同步更新清单并追加开发日志；只有全部任务及完成条件均有验证依据，才将阶段标为“已完成”，填写完成日期、对应提交和开发日志链接。阶段可以交叉实施，提前完成某个子项不代表整个阶段完成。
@@ -198,12 +200,12 @@ tests/
 - [x] 使用 NuGet 依赖锁文件。
 - [x] 加入自动差异空白检查及强制锁定模式恢复验证。
 - [x] 将发行包启动冒烟纳入发布流程；通过 `tests/build-rollback.ps1` 验证失败后保留旧产物，干净 checkout 仍待验收。
-- [ ] 建立构建、测试耗时和覆盖范围基线。
+- [x] 建立构建、测试耗时和覆盖范围基线；发布脚本生成 `engineering-baseline.json`，区分检查计数与尚未接入的源代码覆盖率。
 - [x] 发布脚本使用 staging，成功后替换产物，失败时尝试回滚。
 - [x] 增加总体技术方案。
-- [ ] 增加 ADR 模板。
+- [x] 增加 ADR 模板。
 
-依据：[`windows-ci.yml`](../.github/workflows/windows-ci.yml)、[`build.ps1`](../build.ps1)、[`build-rollback.ps1`](../tests/build-rollback.ps1)、[`packages.lock.json`](../src/PortHarbor/packages.lock.json)；历史构建与检查结果见[开发日志](DEVELOPMENT-LOG.md)。干净 checkout 仍需在独立环境复核。
+依据：[`windows-ci.yml`](../.github/workflows/windows-ci.yml)、[`build.ps1`](../build.ps1)、[`build-rollback.ps1`](../tests/build-rollback.ps1)、[`packages.lock.json`](../src/PortHarbor/packages.lock.json)、[`ADR 模板`](adr/0000-template.md)；基线报告为 `engineering-baseline.json`，历史构建与检查结果见[开发日志](DEVELOPMENT-LOG.md)。干净 checkout 仍需在独立环境复核。
 
 **完成条件：**干净 checkout 可按文档复现 build/test；PR 有自动结果；失败时能看到稳定测试名和机器可读报告；发布失败不删除旧 ZIP。
 
@@ -213,6 +215,7 @@ tests/
 
 - [x] 建立稳定错误码、连接阶段、状态、可重试性和 `operationId`，接入终端及文件连接诊断。
 - [x] 增加安全诊断展示器，文件视图显示阶段及错误类别。
+- [x] 建立 Application 内嵌诊断消息目录，将稳定错误码/阶段与中文提示分离；无 UI 的 DiagnosticPresenter 负责组合，覆盖完整性、未知枚举/语言回退、操作编号和全协议敏感信息隔离。
 - [x] 统一终端及 RDP 的诊断展示，核验 SSH、Telnet、FTP、SFTP、Shell 和 RDP 的失败路径；串口实体设备及 FTPS 仍待实机验证。
 - [x] 将文件传输契约及 FTP/SFTP 适配器改为原生异步，统一取消、超时和结构化进度，移除文件视图的同步调用包装。
 - [ ] 完善其他同步网络路径的异步、取消及超时处理。
@@ -223,7 +226,7 @@ tests/
 - [x] 增加终端启动中取消、晚启动返回、阻塞写入关闭竞态，以及真实 SSH 握手/Telnet 读取阻塞取消检查。
 - [ ] 补齐其他断网、无效主机、串口阻塞及进程退出等覆盖。
 
-依据：[`DiagnosticClassifier.cs`](../src/PortHarbor.Infrastructure/DiagnosticClassifier.cs)、[`DiagnosticPresenter.cs`](../src/PortHarbor/DiagnosticPresenter.cs)、[`ConnectionStatusLabel.cs`](../src/PortHarbor/ConnectionStatusLabel.cs)、终端/RDP/文件连接实现及[开发日志](DEVELOPMENT-LOG.md)。诊断增量报告位于 ignored `artifacts/diagnostics-validation`，本轮分层回归位于 `artifacts/file-transfer-layering`；其余未勾选任务仍需单独验收。
+依据：[`DiagnosticClassifier.cs`](../src/PortHarbor.Infrastructure/DiagnosticClassifier.cs)、[`DiagnosticPresenter.cs`](../src/PortHarbor.Application/DiagnosticPresenter.cs)、[`消息目录`](../src/PortHarbor.Application/DiagnosticMessageCatalog.cs)、[`资源`](../src/PortHarbor.Application/Resources/DiagnosticMessages.resx)、[`ConnectionStatusLabel.cs`](../src/PortHarbor/ConnectionStatusLabel.cs)、[诊断消息约定](DIAGNOSTICS.md)、[ADR 0008](adr/0008-diagnostic-message-catalog.md)、终端/RDP/文件连接实现及[开发日志](DEVELOPMENT-LOG.md)。目录回归报告位于 ignored `artifacts/diagnostic-messages/`；其余未勾选任务仍需单独验收。
 
 **完成条件：**每个连接失败都能定位操作阶段和错误类别；关闭页面能及时解除后台 I/O；没有凭据或终端文本进入日志。
 
@@ -240,10 +243,10 @@ tests/
 - [x] 将 `Store` 的 JSON/INI 格式读写、密码库及主机信任持久化拆入 `PortHarbor.Infrastructure`；适配器共享配置状态、写入锁及原子替换，项目目标 `net8.0-windows` 且不引用 WinForms。
 - [x] 将 `FileConnection` 和共享超时策略迁入 Application，通过 `IRemoteFileSystem` 及错误分类回调隔离协议厂商；独立 `net8.0` 检查覆盖取消、临时文件、提交、超时及关闭竞态。
 - [x] 定义 `ITerminalSession`/`ITerminalTransport`，将终端校验、连接生命周期、输入队列、UTF-8 解码、取消与关闭编排迁入 Application。
-- [ ] 将导入导出业务策略继续迁入 Application，格式读写保留在适配器。
+- [x] 将分类合并、新 ID 分配、导入/导出禁用密码保存和敏感字段排除迁入 Application；格式读写与最新快照下单次保存/回滚留在存储适配器，补齐真正 JSON/INI 交叉格式、并发与凭据关联检查。
 - [x] 为会话 JSON v1/v2 和便携 INI 建立 fixture、迁移、凭据关联及失败回滚检查；先保持当前界面和用户数据目录不变。
 
-验收依据：独立 Application 检查 92 项、核心检查 217 项、Windows 检查 14 项及 UI 检查 45 项通过，包含平台边界、终端/文件取消与关闭竞态、JSON/INI 导入失败、主机信任写入失败回滚、能力缺失/恢复和路径迁移边界。Release 构建与报告见[开发日志](DEVELOPMENT-LOG.md)；DPAPI 已移入平台项目，文件选择器及 Infrastructure 的 Windows 目标仍待后续隔离，整个阶段尚未完成。
+验收依据：独立 Application 检查 151 项、核心检查 320 项、Windows 14 项及 UI 57 项通过，覆盖传输策略、真实 JSON/INI 交叉格式、并发合并、凭据关联与失败回滚，以及无 UI 诊断呈现、消息完整性和回退；核心含默认便携启动及末尾目录分隔符回归，发布门禁检查默认便携首次启动和重启。Release 构建报告见[开发日志](DEVELOPMENT-LOG.md)。导入导出规则与诊断呈现已进入 Application，Infrastructure 的 Windows 目标和其余纯逻辑仍待后续处理，整个阶段尚未完成。
 
 **完成条件：**Domain/Application 可单独构建和测试；应用项目不需要引用 WinForms；旧配置在重构前后读取结果一致。
 
@@ -259,10 +262,10 @@ tests/
 - [x] 定义 `ISecretProtector`，将 DPAPI 移入 Windows 平台项目并注入存储；保留安装版、便携版及旧凭据迁移格式，平台失败不得降级保护。
 - [x] 定义 `IRemoteDesktopLauncher`，将 RDP 校验/配置/诊断迁入 Application，mstsc 与临时文件生命周期移入 Windows 平台项目。
 - [x] 定义 `IAppDataPaths`，将安装/便携路径、旧 EasyConnect 迁移源和 RDP 临时目录解析移入 Windows 平台项目；存储适配器消费解析结果并拒绝配置文件越界路径。
-- [ ] 将 Windows 路径/文件选择器继续移入 Windows 平台项目。
+- [x] 定义 `IFilePicker`，将会话导入导出及文件上传下载的打开/保存对话框迁入独立 `PortHarbor.Platform.Windows.Forms`；保留现有 owner、过滤器、默认文件名及取消/覆盖语义，既有平台库不增加 WinForms 依赖。
 - [x] 在 UI 组合根注册 `IPlatformCapabilities` Windows 实现，编辑器禁用不可用连接但允许保存，连接入口在创建资源前显示原因并支持重新检查；帮助菜单展示包括 DPAPI 在内的能力概览。
 
-依据：[`FileTransferContracts.cs`](../src/PortHarbor.Domain/FileTransferContracts.cs)、[`TerminalContracts.cs`](../src/PortHarbor.Application/TerminalContracts.cs)、[`平台服务端口`](../src/PortHarbor.Application/PlatformContracts.cs)、[`路径端口`](../src/PortHarbor.Application/AppDataPaths.cs)、[`能力端口与连接策略`](../src/PortHarbor.Application/PlatformCapabilities.cs)、[`Windows 平台项目`](../src/PortHarbor.Platform.Windows/PortHarbor.Platform.Windows.csproj)、[文件传输约定](FILE-TRANSFER.md)、[终端会话约定](TERMINAL-SESSIONS.md)、[凭据与 RDP 决策](adr/0003-secret-protection-and-rdp.md)、[平台能力决策](adr/0004-platform-capabilities.md)、[路径决策](adr/0005-application-data-paths.md)及开发日志。协议回环 26 项通过，DPAPI 迁移、RDP 清理、能力缺失/恢复、路径解析/迁移与界面接入已覆盖；文件选择器、真实 RDP 登录及串口仍需后续验收。
+依据：[`FileTransferContracts.cs`](../src/PortHarbor.Domain/FileTransferContracts.cs)、[`TerminalContracts.cs`](../src/PortHarbor.Application/TerminalContracts.cs)、[`平台服务端口`](../src/PortHarbor.Application/PlatformContracts.cs)、[`路径端口`](../src/PortHarbor.Application/AppDataPaths.cs)、[`文件选择端口`](../src/PortHarbor.Application/FilePicker.cs)、[`能力端口与连接策略`](../src/PortHarbor.Application/PlatformCapabilities.cs)、[`Windows 平台项目`](../src/PortHarbor.Platform.Windows/PortHarbor.Platform.Windows.csproj)、[文件传输约定](FILE-TRANSFER.md)、[终端会话约定](TERMINAL-SESSIONS.md)、[凭据与 RDP 决策](adr/0003-secret-protection-and-rdp.md)、[平台能力决策](adr/0004-platform-capabilities.md)、[路径决策](adr/0005-application-data-paths.md)、[文件选择决策](adr/0006-windows-file-picker.md)及开发日志。协议回环 26 项通过，DPAPI 迁移、RDP 清理、能力缺失/恢复、路径解析/迁移与文件选择接入已覆盖；真实 RDP 登录及串口仍需后续验收，系统文件对话框点击未纳入自动化。
 
 **完成条件：**领域/用例项目没有 Win32 API 和协议厂商类型；各适配器单独可测；Windows 当前功能保持现有验收结果。
 
@@ -322,10 +325,10 @@ tests/
 
 以下安排对应第 8 节任务清单，不代表新增验收项：
 
-1. 下一步将 Windows 文件打开/保存对话框边界迁入平台项目，并保留现有导入/导出文件名、过滤器与无密码数据策略。
-2. 本地化资源、诊断消息目录和更多服务器兼容性测试实施前补入阶段 1 清单。
-3. 完成阶段 0 尚未验收的故障注入、干净 checkout 和耗时/覆盖基线，具体缺口见第 8 节。
-4. 继续按阶段 2、3 完善导入导出业务策略与应用端口，保持 Windows 行为及用户数据兼容。
+1. 在独立干净 checkout 复核扩展基线构建；真实串口设备、真实 RDP 登录及生产服务器兼容性仍需真实环境验收，不将当前工作区通过当成干净 checkout 通过。
+2. 继续补齐阶段 1 的故障场景与服务器兼容性；更多语言资源实施前另行补入阶段 1 清单，按实际需求验收。
+3. 补齐阶段 0 尚未验收的故障注入和发布回滚范围，具体缺口见第 8 节。
+4. 继续按阶段 2、3 完善其余应用端口，保持 Windows 行为及用户数据兼容。
 5. 阶段 4 仅在目标用户、交付平台和能力清单明确后启动。
 
 这一路径先降低当前开发和故障处理成本，同时使平台迁移成为替换明确组件的工作，而不是重写整个产品。

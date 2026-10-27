@@ -102,6 +102,12 @@
           "PortHarbor.Application": "[1.0.0, )",
           "System.IO.Ports": "[8.0.0, )"
         }
+      },
+      "portharbor.platform.windows.forms": {
+        "type": "Project",
+        "dependencies": {
+          "PortHarbor.Application": "[1.0.0, )"
+        }
       }
     },
     "net8.0-windows7.0/win-x64": {

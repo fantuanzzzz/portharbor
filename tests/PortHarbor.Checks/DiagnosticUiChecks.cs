@@ -9,6 +9,7 @@ internal static partial class Program
         using var host = new Form { Width = 800, Height = 200 };
         var label = new ConnectionStatusLabel { Dock = DockStyle.Fill };
         host.Controls.Add(label); host.Show(); Application.DoEvents();
+        Check(label.Text == DiagnosticMessageCatalog.ReadyToConnect, "connection status label loads its ready prompt from the embedded catalog");
         var failure = new ConnectionDiagnostic(Guid.NewGuid(), Protocol.SSH, ConnectionState.Failed,
             ConnectionStage.Authenticating, ConnectionErrorCode.AuthenticationFailed, false, "private-secret\x1b[31m");
         var report = Task.Run(() =>
@@ -24,6 +25,11 @@ internal static partial class Program
         label.Report(failure with { State = ConnectionState.Connecting, Stage = ConnectionStage.Connecting, ErrorCode = ConnectionErrorCode.None });
         label.Report(failure with { State = ConnectionState.Connected, ErrorCode = ConnectionErrorCode.None });
         Check(label.Text == "已连接", "new connection clears the previous diagnostic failure");
+        label.Report(failure with { Stage = (ConnectionStage)999, ErrorCode = (ConnectionErrorCode)999 });
+        Check(label.Text == "连接异常（未知错误）。操作编号：" + failure.OperationId.ToString("N")[..8],
+            "status label shows the catalog fallback and operation reference for undefined diagnostics");
+        label.Report(failure with { State = ConnectionState.Closed, Stage = ConnectionStage.Closing, ErrorCode = ConnectionErrorCode.None });
+        Check(label.Text.Contains("未知错误"), "catalog fallback failure remains visible after terminal cleanup");
         label.Dispose();
         Task.Run(() => label.Report(failure)).GetAwaiter().GetResult();
         Check(label.IsDisposed, "late diagnostic after view disposal is ignored safely");

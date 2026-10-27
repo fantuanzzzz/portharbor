@@ -97,22 +97,35 @@ public sealed class Store : IDisposable, IConfigurationRepository, IVault, IHost
     }
     public bool CheckHostKey(string host, int port, string fingerprint, Func<string, bool> confirm)
         => hostKeyTrust.CheckHostKey(host, port, fingerprint, confirm);
-    public void Export(string path)
+    // Preserve existing callers while all transfer policy lives in Application.
+    public void Export(string path) => new ConfigurationTransferService(this).Export(path);
+    public int Import(string path) => new ConfigurationTransferService(this).Import(path);
+    SessionConfiguration IConfigurationTransfer.ReadSessionFile(string path)
     {
-        lock (gate) state.Storage.Export(path, Data);
+        var data = ConfigurationFileStorage.Read(path);
+        return new SessionConfiguration(data.Groups.ToArray(), data.Sessions.Select(s => s with { }).ToArray());
     }
-    public int Import(string path)
+    void IConfigurationTransfer.WriteSessionFile(string path, SessionConfiguration configuration)
+        => ConfigurationFileStorage.WriteSessionFile(path, configuration);
+    SessionConfiguration IConfigurationTransfer.GetSessionConfiguration()
     {
-        var imported = ConfigurationFileStorage.Read(path);
+        lock (gate) return SessionSnapshot();
+    }
+    SessionConfiguration SessionSnapshot() => new(Data.Groups.ToArray(), Data.Sessions.Select(s => s with { }).ToArray());
+    void IConfigurationTransfer.UpdateSessionConfiguration(Func<SessionConfiguration, SessionConfiguration> change)
+    {
+        ArgumentNullException.ThrowIfNull(change);
         lock (gate)
         {
+            var updated = change(SessionSnapshot());
+            var groups = updated.Groups.ToList();
+            var sessions = updated.Sessions.Select(s => s with { }).ToList();
             var previousGroups = Data.Groups;
             var previousSessions = Data.Sessions;
-            Data.Groups = Data.Groups.Concat(imported.Groups).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            Data.Sessions = Data.Sessions.Concat(imported.Sessions.Select(s => s with { Id = Guid.NewGuid(), SavePassword = false })).ToList();
+            Data.Groups = groups;
+            Data.Sessions = sessions;
             try { Save(); }
             catch { Data.Groups = previousGroups; Data.Sessions = previousSessions; throw; }
         }
-        return imported.Sessions.Count;
     }
 }

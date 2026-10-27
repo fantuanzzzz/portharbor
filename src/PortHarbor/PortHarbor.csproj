@@ -18,5 +18,6 @@
     <ProjectReference Include="../PortHarbor.Application/PortHarbor.Application.csproj" />
     <ProjectReference Include="../PortHarbor.Domain/PortHarbor.Domain.csproj" />
     <ProjectReference Include="../PortHarbor.Platform.Windows/PortHarbor.Platform.Windows.csproj" />
+    <ProjectReference Include="../PortHarbor.Platform.Windows.Forms/PortHarbor.Platform.Windows.Forms.csproj" />
   </ItemGroup>
 </Project>

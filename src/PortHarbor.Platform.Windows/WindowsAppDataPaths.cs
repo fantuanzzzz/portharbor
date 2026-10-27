@@ -15,8 +15,8 @@ public sealed class WindowsAppDataPaths : IAppDataPaths
     internal WindowsAppDataPaths(string? directory, bool portable, string baseDirectory, string localAppData, bool allowLegacyMigration = true)
     {
         IsPortable = portable;
-        if (directory != null) ConfigurationDirectory = Path.GetFullPath(directory);
-        else if (portable) ConfigurationDirectory = Path.GetFullPath(baseDirectory);
+        if (directory != null) ConfigurationDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+        else if (portable) ConfigurationDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(baseDirectory));
         else
         {
             if (string.IsNullOrWhiteSpace(localAppData)) throw new IOException("无法确定 Windows 用户数据目录。");

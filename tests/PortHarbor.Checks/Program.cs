@@ -42,8 +42,11 @@ internal static partial class Program
             {
                 Storage(root); VaultAndGroups(root); Terminal(); Telnet(); await FileDiagnostics(root); await FileTransferContract(root);
                 DiagnosticClassification(root); await TerminalDiagnostics(root);
+                DiagnosticMessageChecks.Run(Check);
                 SessionRepositoryCompatibility(root);
                 StorageAdapters(root);
+                ConfigurationTransferChecks.Run(Check);
+                ConfigurationTransferStorage(root);
                 await TerminalSessionChecks.RunAsync(Check);
                 await TerminalAdapters();
                 await WindowsPlatformAdapters();
@@ -52,6 +55,7 @@ internal static partial class Program
                 PlatformCapabilityChecks.Run(Check);
                 WindowsCapabilityDetection();
                 WindowsPathResolution(root);
+                FilePickerAdapters(root);
             }
             else if (args.Contains("--windows"))
             {
@@ -126,6 +130,7 @@ internal static partial class Program
         TerminalCloseUi(root);
         SerialProviderUi();
         CapabilityUi(root);
+        FilePickerUi(root);
     }
     static T FindControl<T>(Control parent) where T : Control
     {

@@ -17,7 +17,8 @@ flowchart TD
 - Infrastructure 中的 `FileTransferFactory` 是当前应用的构造入口，装配协议适配器与 Application 用例。`FileView` 还接受注入的 `IFileTransfer`，并负责其释放。
 - Application 中的 `FileConnection` 管理诊断、连接状态、进度累计、取消检查、临时文件和提交流程，目标为 `net8.0`，只依赖 Domain。其构造参数为协议、`IRemoteFileSystem` 和可选错误分类回调；默认 `ConnectionErrorPolicy` 只处理框架异常。
 - Infrastructure 中的 FTP/SFTP 适配器实现 `IRemoteFileSystem`，各自处理连接、列表映射、文件流、覆盖提交和协议资源释放。工厂注入包含 SSH.NET 异常识别的 `DiagnosticClassifier`，共享 SSH 认证与主机密钥配置由 `SshClientSupport` 提供；适配器不依赖 UI 中的终端类。
-- Infrastructure 当前仍包含 DPAPI，目标为 `net8.0-windows`；传输用例可脱离 Windows 构建和检查，本次未将整个协议适配项目迁为跨平台目标。
+- Infrastructure 目标仍为 `net8.0-windows`，DPAPI 已迁入 Windows 平台项目并经 `ISecretProtector` 注入；传输用例可脱离 Windows 构建和检查，整个协议适配项目尚未迁为跨平台目标。
+- FileView 通过 Application 的 `IFilePicker` 选择本地上传来源/下载目标；默认 `WindowsFilePicker` 位于独立的 Windows Forms 平台项目。取消选择不启动传输，上传仍取本地文件名组合远程路径，下载保留建议文件名清理及本地覆盖确认，详见 [ADR 0006](adr/0006-windows-file-picker.md)。
 - 工厂显式支持 FTP/SFTP；其他协议会被拒绝，避免把错误配置当成 FTP 连接。
 
 ## 契约与资源约定

@@ -74,6 +74,8 @@ try
     await PortHarbor.Checks.TerminalSessionChecks.RunAsync(Check);
     PortHarbor.Checks.RemoteDesktopChecks.Run(Check);
     PortHarbor.Checks.PlatformCapabilityChecks.Run(Check);
+    PortHarbor.Checks.ConfigurationTransferChecks.Run(Check);
+    PortHarbor.Checks.DiagnosticMessageChecks.Run(Check);
     Console.WriteLine($"{results.Count} checks passed");
     return 0;
 }
@@ -112,8 +114,20 @@ sealed class MemorySessionRepository : IConfigurationRepository
     public IReadOnlyList<Session> GetSessions() => Sessions;
     public IReadOnlyList<string> GetGroups() => Groups;
     public void AddGroup(string name) => Groups.Add(name);
-    public void Export(string path) => LastExportPath = path;
-    public int Import(string path) { LastImportPath = path; return 2; }
+    public SessionConfiguration ReadSessionFile(string path)
+    {
+        LastImportPath = path;
+        return new([], [new Session { Host = "import-one.invalid" }, new Session { Host = "import-two.invalid" }]);
+    }
+    public void WriteSessionFile(string path, SessionConfiguration configuration) => LastExportPath = path;
+    public SessionConfiguration GetSessionConfiguration() => new(Groups.ToArray(), Sessions.Select(s => s with { }).ToArray());
+    public void UpdateSessionConfiguration(Func<SessionConfiguration, SessionConfiguration> change)
+    {
+        if (Failure != null) throw Failure;
+        var updated = change(GetSessionConfiguration());
+        Groups.Clear(); Groups.AddRange(updated.Groups);
+        Sessions.Clear(); Sessions.AddRange(updated.Sessions);
+    }
     public void Save(Session session, string password)
     {
         if (Failure != null) throw Failure;

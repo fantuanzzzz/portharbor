@@ -54,9 +54,9 @@ internal sealed class ConfigurationFileStorage
         else File.Move(temp, FilePath);
     }
 
-    internal void Export(string path, AppData data) => File.WriteAllText(path, JsonSerializer.Serialize(new AppData
+    internal static void WriteSessionFile(string path, SessionConfiguration configuration) => File.WriteAllText(path, JsonSerializer.Serialize(new AppData
     {
-        Groups = data.Groups.ToList(),
-        Sessions = data.Sessions.Select(s => s with { SavePassword = false }).ToList()
+        Groups = configuration.Groups.ToList(),
+        Sessions = configuration.Sessions.Select(s => s with { }).ToList()
     }, Json));
 }

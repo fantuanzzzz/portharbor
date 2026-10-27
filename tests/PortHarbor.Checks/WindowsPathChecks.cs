@@ -22,6 +22,39 @@ internal static partial class Program
             && marked.ConfigurationFile == Path.Combine(Path.GetFullPath(app), "PortHarbor.ini")
             && marked.LegacyConfigurationFile == null,
             "portable marker selects the executable directory and never enables installed migration");
+        // AppContext.BaseDirectory has a trailing separator in the published executable.
+        var trailingBase = WindowsAppDataPaths.Resolve([], app + Path.DirectorySeparatorChar, local);
+        Check(trailingBase.IsPortable && trailingBase.ConfigurationDirectory == app
+            && Path.GetDirectoryName(trailingBase.ConfigurationFile) == trailingBase.ConfigurationDirectory
+            && trailingBase.TemporaryDirectory == app,
+            "default portable startup normalizes a trailing executable directory separator");
+        using (var firstStart = new Store(new WindowsSecretProtector(), trailingBase))
+        {
+            Check(firstStart.IsPortable && File.Exists(firstStart.FilePath) && firstStart.GetSessions().Count == 0,
+                "default portable startup creates its executable-adjacent INI without a data directory override");
+            firstStart.PutSession(new Session { Name = "Portable startup", Host = "startup.invalid" }, "");
+        }
+        using (var restart = new Store(new WindowsSecretProtector(), WindowsAppDataPaths.Resolve([], app + Path.DirectorySeparatorChar, local)))
+            Check(restart.GetSessions().Single().Name == "Portable startup",
+                "default portable restart preserves the executable-adjacent session configuration");
+        var trailingOverride = WindowsAppDataPaths.Resolve(["--data-dir", app + Path.DirectorySeparatorChar], app, local);
+        Check(trailingOverride.IsPortable && trailingOverride.ConfigurationDirectory == app
+            && trailingOverride.ConfigurationFile == trailingBase.ConfigurationFile,
+            "explicit portable data directory normalizes its trailing separator");
+        var trailingInstalled = WindowsAppDataPaths.Resolve(["--installed", "--data-dir", app + Path.DirectorySeparatorChar], app, local);
+        using (var installedStart = new Store(new WindowsSecretProtector(), trailingInstalled))
+            Check(!installedStart.IsPortable && installedStart.DirectoryPath == app
+                && installedStart.FilePath == Path.Combine(app, "settings.json"),
+                "explicit installed data directory with a trailing separator is accepted by storage");
+        var alternateSeparator = WindowsAppDataPaths.Resolve([], app + Path.AltDirectorySeparatorChar, local);
+        Check(alternateSeparator.ConfigurationDirectory == app,
+            "portable executable directory also normalizes an alternate trailing separator");
+        string volumeRoot = Path.GetPathRoot(app)!;
+        var rootPaths = new WindowsAppDataPaths(null, true, volumeRoot, local);
+        Check(rootPaths.ConfigurationDirectory == volumeRoot
+            && Path.IsPathFullyQualified(rootPaths.ConfigurationDirectory)
+            && Path.GetDirectoryName(rootPaths.ConfigurationFile) == volumeRoot,
+            "directory normalization preserves the drive root separator without accessing its configuration");
         var forcedInstalled = WindowsAppDataPaths.Resolve(["--installed"], app, local);
         Check(!forcedInstalled.IsPortable && forcedInstalled.LegacyConfigurationFile != null,
             "explicit installed mode overrides portable marker and retains legacy migration");

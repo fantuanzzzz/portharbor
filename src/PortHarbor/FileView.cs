@@ -5,6 +5,7 @@ public sealed class FileView : UserControl
     static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(15);
     static readonly TimeSpan OperationTimeout = TimeSpan.FromSeconds(30);
     readonly IFileTransfer connection;
+    readonly IFilePicker filePicker;
     readonly TextBox path = new() { Width = 340 };
     readonly ListView list = new() { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, MultiSelect = false, HideSelection = false };
     readonly Label status = new() { Dock = DockStyle.Bottom, Height = 28, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(8, 0, 0, 0) };
@@ -13,12 +14,13 @@ public sealed class FileView : UserControl
     CancellationTokenSource? taskStop;
     TaskCompletionSource? operationFinished;
     bool busy, connected, closing;
-    public FileView(Session s, IHostKeyTrust hostKeyTrust, string password, Func<string, bool> confirm)
-        : this(FileTransferFactory.Create(s, hostKeyTrust, password, confirm), s.RemotePath) { }
+    public FileView(Session s, IHostKeyTrust hostKeyTrust, string password, Func<string, bool> confirm, IFilePicker? filePicker = null)
+        : this(FileTransferFactory.Create(s, hostKeyTrust, password, confirm), s.RemotePath, filePicker) { }
 
     // The view owns and disposes the supplied transfer instance.
-    public FileView(IFileTransfer connection, string initialPath)
+    public FileView(IFileTransfer connection, string initialPath, IFilePicker? filePicker = null)
     {
+        this.filePicker = filePicker ?? new WindowsFilePicker(this);
         this.connection = connection; connection.Diagnostic += OnDiagnostic; path.Text = initialPath;
         list.Columns.Add("名称", 300); list.Columns.Add("类型", 80); list.Columns.Add("字节", 110); list.Columns.Add("修改时间", 170);
         toolbar.Controls.Add(path);
@@ -80,29 +82,29 @@ public sealed class FileView : UserControl
         list.EndUpdate();
     }
     Task LoadPath() => Work(async token => { if (!connected) { await connection.ConnectAsync(token, ConnectTimeout); connected = true; } await RefreshListing(token); });
-    async Task Upload()
+    internal async Task Upload()
     {
         if (busy) return;
-        using var dialog = new OpenFileDialog(); if (dialog.ShowDialog(this) != DialogResult.OK) return;
-        string remote = Join(path.Text, Path.GetFileName(dialog.FileName));
+        string? file = filePicker.OpenFile(new()); if (file == null) return;
+        string remote = Join(path.Text, Path.GetFileName(file));
         await Work(async token =>
         {
             bool exists = await connection.ExistsAsync(remote, token, OperationTimeout);
             if (exists && MessageBox.Show(this, "远程文件已存在，覆盖？\n" + remote, "上传", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
             var progress = new Progress<TransferProgress>(p => SetStatus($"上传 {p.BytesTransferred:N0} / {p.TotalBytes?.ToString("N0") ?? "?"} 字节"));
-            await connection.UploadAsync(dialog.FileName, remote, token, OperationTimeout, progress); await RefreshListing(token);
+            await connection.UploadAsync(file, remote, token, OperationTimeout, progress); await RefreshListing(token);
         });
     }
-    async Task Download()
+    internal async Task Download()
     {
         if (busy || Selected is not { Directory: false } f) return;
         // Remote names cannot escape the user-selected local destination.
         string name = string.Concat(f.Name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
-        using var dialog = new SaveFileDialog { FileName = name, OverwritePrompt = true }; if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        string? file = filePicker.SaveFile(new(FileName: name)); if (file == null) return;
         await Work(async token =>
         {
             var progress = new Progress<TransferProgress>(p => SetStatus($"下载 {p.BytesTransferred:N0} / {p.TotalBytes?.ToString("N0") ?? f.Size.ToString("N0")} 字节"));
-            await connection.DownloadAsync(f.Path, dialog.FileName, token, OperationTimeout, progress);
+            await connection.DownloadAsync(f.Path, file, token, OperationTimeout, progress);
         });
     }
     async Task Mkdir()

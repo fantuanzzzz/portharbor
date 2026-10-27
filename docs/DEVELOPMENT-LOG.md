@@ -4,6 +4,122 @@ This workbook records every development session. Each entry covers what changed,
 
 本文档保留历史开发与验证记录；各条目的“下一步”表示当时的安排。当前阶段状态、任务勾选及验收条件统一维护在[技术方案第 8 节](TECHNICAL-PLAN.md#8-分阶段实施)，文件传输当前契约见[文件传输约定](FILE-TRANSFER.md)。历史条目不随当前实现变化而回写。
 
+## 2026-10-27 - 扩展工程基线覆盖所有 Windows 自动化入口
+
+### 本次开发内容
+
+- `build.ps1 -ExtendedBaseline` 在既有发布基线外启动仅绑定 loopback 的协议 fixture，并运行协议集成、WinForms 界面截图和 ConPTY 输入/输出冒烟。报告同时汇总 Application、核心、Windows、协议和 UI 的检查数；ConPTY 单独验证 `CONPTY_OK` 标记。
+- 每个扩展入口和协议 fixture 启动都写入 `engineering-baseline.json` 耗时项；报告注明需 Python 3.12+ 及 `tests/requirements.txt`，普通发布构建不增加 Python 依赖。
+- README 增加扩展基线使用命令，技术方案下一步收敛到独立干净 checkout 复核及真实硬件/服务器专项验收。
+
+### 验证与边界
+
+- 使用已安装项目锁定的 Paramiko 5.1.0 / pyftpdlib 2.2.0 执行完整扩展基线；本轮实际结果和各入口耗时见 `artifacts/engineering-baseline-extended-20261027/engineering-baseline.json`。
+- 扩展入口需要桌面会话，CI 当前工作流已运行相同的协议、UI/ConPTY 入口但未统一计时；干净 checkout 和另一环境的可复现性仍待验收。该报告是检查计数，不代表源代码行/分支覆盖率。
+
+## 2026-10-27 - 阶段 0 工程基线报告
+
+### 本次开发内容
+
+- 发布脚本现在为差异检查、锁定恢复、Application/Windows 构建与检查、发布、启动冒烟和两种 ZIP 压缩记录实际耗时，并记录 SDK 版本，输出 `engineering-baseline.json`。
+- 基线报告汇总各检查入口的通过/失败数量，并明确范围：当前发布脚本覆盖 Application、核心 Windows 检查和发布启动；协议回环、WinForms UI/ConPTY 是独立入口；没有引入 coverlet，因此不把检查数量冒充源代码行/分支覆盖率。
+- 新增 ADR 统一模板，要求记录背景、选项、决策、验证、影响限制和复审条件。
+
+### 验证与遗留
+
+- 本轮完整 Release 基线报告见 `artifacts/engineering-baseline-20261027/engineering-baseline.json`；干净 checkout、协议回环/UI/ConPTY 统一耗时仍需在独立环境补齐。
+- 阶段 0 清单的“耗时/覆盖范围基线”和“ADR 模板”已完成；阶段 0 仍因干净 checkout 验收未完成而保持进行中。
+
+## 2026-10-27 - 修复默认便携启动并重发自包含包
+
+### 问题与修复
+
+- 用户运行即用便携版时，Store 报“Resolved application paths must be absolute and keep the configuration file inside its directory.”。对旧包不带 `--data-dir` 运行启动冒烟，复现退出码 1。原因为真实 `AppContext.BaseDirectory` 自带末尾目录分隔符，而配置文件父目录不带，原字符串边界校验错误拒绝同一目录。
+- 上一条即用包的独立测试显式指定了隔离数据目录，未覆盖默认便携目录；此前的通过结果不代表默认双击启动通过。旧 `ready-to-use-20261027` 包存在该缺陷，本条的新包取代其可用性结论。
+- Windows 路径解析对程序目录和显式数据目录使用 `Path.TrimEndingDirectorySeparator(Path.GetFullPath(...))`，保留盘符根目录分隔符；Store 的绝对路径与目录边界校验保留。未更改配置格式或用户原配置。
+- 新增 7 项核心回归：默认便携路径、首次 INI、写入会话后重启、便携及安装显式目录的末尾分隔符、替代分隔符及盘符根目录。
+- 发布脚本改为等待实际 EXE 并校验退出码，覆盖安装隔离目录、无数据目录覆盖的便携首次启动和重启，要求程序旁生成 INI；仅清理私有 staging 中测试产生的空配置，发行 ZIP 不夹带用户配置。增加 `startup-smoke-results.json` 报告。
+
+### 验证与交付
+
+- Application 151、核心 320、Windows 14、WinForms UI 57 项通过；Release 编译 0 警告、0 错误。完整 `build.ps1 -IncludeRuntime -OutputDirectory artifacts/portable-startup-fix-20261027/release` 通过，三项发布启动检查退出码均为 0。
+- 从最终便携 ZIP 重新解压至含中文和空格的独立目录，以系统临时目录作为工作目录，完成首次启动、重启和完全无参数的主窗口启动/正常关闭，三次退出码均为 0，配置均落在 EXE 旁。无参数验证确认主窗口标题为 PortHarbor 连接工作台，而非错误对话框。
+- 新版可直接运行 `artifacts/portable-startup-fix-20261027/release/portable-win-x64/PortHarbor.exe`；ZIP 为同目录 `PortHarbor-0.1.0-portable-win-x64.zip`，75,535,590 字节，包含 Windows x64 运行时且没有 INI/JSON 用户配置。包含当前诊断消息目录增量。
+- ZIP SHA256：`8587C23A33D9870EFB67B61E86BD55F0CB4D3F6AF76B7BF6B443F39F8D3A3A08`。重新解压与无参数验证报告位于 ignored `artifacts/portable-startup-fix-20261027/extracted-startup-results.json`，未覆盖用户原即用目录。
+- `git diff --check` 通过。本次只处理便携启动阻断；阶段 0 基线开发仍为后续任务。
+
+## 2026-10-27 - 即用便携版与本地诊断消息目录
+
+### 先交付的便携版
+
+- 在继续改动源码前运行 `build.ps1 -IncludeRuntime -OutputDirectory artifacts/ready-to-use-20261027`，冻结上一轮会话导入导出策略完成后的可用版本。Application 109 / 核心 271 / Windows 14 项及发布启动退出冒烟通过。
+- 生成 Windows x64 自包含便携包，ZIP 75,533,733 字节，包含 coreclr、hostfxr、Windows Forms 运行时和便携标志，不含用户配置。目录为 `artifacts/ready-to-use-20261027/portable-win-x64/`，可直接运行 PortHarbor.exe；移动时保留完整目录。
+- 独立便携 EXE 使用隔离 `--data-dir` 完成启动/退出检查，自动便携模式生成 PortHarbor.ini。后续开发发布到另一目录，不覆盖用户即用目录。
+- 即用便携 ZIP SHA256：`D852BEF3FBCFC2B061D6AA4F9508DF4C75F490E6546480273E4C0FE2E422B6DE`。它不包含随后开发的诊断消息目录增量。
+
+### 本次开发内容与原因
+
+- Application 内嵌 `Resources/DiagnosticMessages.resx`，集中错误码、阶段、生命周期回退、准备连接、外部 RDP 启动及组合格式。新增 `DiagnosticMessageCatalog`，已定义枚举必须有明确资源，未知数值按稳定规则回退。
+- 把无控件依赖的 `DiagnosticPresenter` 从 UI 移入 Application，继续保留中文文案、正常关闭/连接优先级、RDP 仅客户端启动提示和 8 位操作编号。ConnectionStatusLabel 初始提示也使用目录，后台 UI 调度与失败保留规则不变。
+- 呈现仅使用受信任资源、枚举及操作编号，不读取原始 Message 或异常内容；没有引入日志、遥测、其他语言界面、第三方包或运行时外部文件。平台能力及普通菜单提示不在本轮范围。
+- 新增共享消息检查，覆盖资源键精确匹配、全部枚举、未定义值、四种 UI culture 默认回退、七种协议所有状态/阶段/错误组合的脱敏与格式。新增 UI 的准备提示、未知错误回退及清理后保留失败检查。
+- 新增诊断消息约定与 ADR 0008，更新技术方案、索引、README 和下一步。
+
+### 验证结果
+
+- Application 151 项、核心 313 项、Windows 14 项、WinForms UI 57 项通过；Release 构建 0 警告、0 错误，ConPTY UI 输出包含 `CONPTY_OK`。
+- `build.ps1 -OutputDirectory artifacts/diagnostic-messages/release` 完整通过，锁定恢复、应用/核心/Windows 门禁、发布 EXE 启动退出冒烟以及安装版/便携版 ZIP 生成通过。消息资源内嵌在 Application，不依赖源码目录；开发产物与即用自包含便携版分开。
+- 报告、截图和开发发布产物位于 ignored `artifacts/diagnostic-messages/`。本轮没有改动协议适配器，未重跑协议回环；最近一次 26 项通过见文件选择器条目。`git diff --check`、本轮文档链接与即用便携 ZIP 哈希复核通过。
+
+### 边界与下一步
+
+- 默认资源仍只有中文；en-US 等仅回退中文，不表示已有多语言产品。未知枚举安全回退不掩盖已定义枚举资源遗漏；发布前检查必须同步维护资源键。
+- 下一步补齐阶段 0 可重复验证及耗时/覆盖范围基线，记录各入口真实执行耗时和报告；干净 checkout 需要独立环境与待提交增量的明确处理，不能把当前工作区通过记为干净 checkout 已验收。
+
+## 2026-10-27 - 会话导入导出策略与原子配置更新
+
+### 本次开发内容与原因
+
+- Application 新增 `SessionConfiguration`、`IConfigurationTransfer` 和 `ConfigurationTransferService`，承担分类稳定合并/不区分大小写去重、导入新 ID 分配、导入/导出关闭 SavePassword，以及仅允许分类/会话进入传输 DTO 的规则。既有会话、凭据、密码库与主机信任保持原值。
+- `ConfigurationService` 调用应用用例；Store 保留公开 Import/Export 兼容入口并委托同一用例。格式适配器继续验证/读取 JSON v1/v2 与 INI，输出原有无密码 JSON v2 外形，不再持有合并/新 ID/SavePassword 清除算法。
+- 导入通过共享锁内最新快照计算并单次原子保存，失败恢复原分类和会话集合，成功后才返回数量；快照与提交结果复制 Session，防止可变记录引用泄漏。没有改成逐条保存，也未新增跨进程事务承诺。
+- 新增共享 Application 策略检查和真实存储检查，覆盖源文件保留、ID 冲突/重复导入、空分类、所有协议、快照隔离、读写/提交失败、JSON/INI 交叉格式、并发合并、原子备份及重启凭据关联。发现原 `StorageAdapterChecks` 标为 INI 的分支实际为 JSON 模式，已修正为真正便携 INI。
+- 新增 ADR 0007 与会话配置导入导出约定，更新文档索引、README、技术方案任务和下一步。本轮未增加包或改变依赖版本。
+
+### 验证结果
+
+- 独立 Application 检查 109 项、核心检查 271 项通过；Release 构建 0 警告、0 错误。首次沙箱核心运行因当前用户 DPAPI 不可用失败，改在授权 Windows 用户环境重跑后全部通过，没有替换密码保护实现或跳过失败项。
+- WinForms UI 检查 54 项通过，继续覆盖取消选择、导入信任确认、真实存储导入与无密码导出。
+- 完整 `build.ps1 -OutputDirectory artifacts/configuration-transfer/release` 成功，锁定恢复、Application 109 / 核心 271 / Windows 14 门禁及发布 EXE 启动退出冒烟通过，生成安装版和便携版 ZIP。报告和产物位于 ignored `artifacts/configuration-transfer/`。
+- 本轮未修改协议适配器，未重复 FTP/SFTP/SSH/Telnet 回环；最近一次回环 26 项和 ConPTY UI 输出验证见前一文件选择器条目。`git diff --check` 与本轮文档本地链接检查通过。
+
+### 边界与下一步
+
+- 读取和写出文件仍同步；导出目标保持原有直接 JSON 写入行为，不承诺原子替换/备份。进程内共享锁不解决多进程同时写同一配置目录。导入信任确认仍在 UI，真实串口、RDP 登录和 FTPS 等验收未扩大。
+- 下一步建立本地诊断消息目录，将错误码/阶段到中文提示的映射与呈现代码分离，补齐提示完整性、未知值回退和敏感信息不泄漏检查；已在技术方案阶段 1 增加待办。
+
+## 2026-10-27 - 文件选择端口与 Windows Forms 平台适配
+
+### 本次开发内容与原因
+
+- Application 新增 `IFilePicker` 和不可变 `FilePickerOptions`，统一单文件打开/保存、建议文件名、过滤器与取消返回 `null` 的契约，不依赖窗口类型。
+- 新建 `PortHarbor.Platform.Windows.Forms`，把 `OpenFileDialog` / `SaveFileDialog` 的创建、模态 owner、显示及释放收拢为 `WindowsFilePicker`。此项目只引用 Application 和 Windows Forms 框架，未新增 NuGet 包；已有 Windows 平台库继续不引用 WinForms。
+- MainForm 导入/导出和 FileView 上传/下载改为可注入选择器。保持 JSON 过滤器、导出默认名、导入信任确认、无密码/密码库/主机信任导出，以及下载建议文件名清理和覆盖提示。取消选择不触发存储或传输。
+- 增加适配器核心检查与真实存储/内存文件传输的 UI 接入检查，覆盖 Unicode/空格路径、取消、异常释放、拒绝/确认导入及精确传递上传下载路径。原有单元入口与 CI 自动包含新增检查。
+- 新增 ADR 0006，更新技术方案、README、文档索引和文件传输约定，依赖锁只增加项目引用。
+
+### 验证结果
+
+- 锁定恢复、Application 与 Windows 检查项目 Release 构建通过，最终 0 警告、0 错误。首次沙箱恢复因 NuGet 审计网络不可达产生 NU1900，授权联网重试后消除。
+- Application 检查 92 项、核心检查 226 项、Windows/ConPTY 检查 14 项、WinForms UI 检查 54 项、FTP/SFTP/SSH/Telnet 本机回环 26 项均通过；ConPTY 界面输出包含 `CONPTY_OK`。
+- 完整 `build.ps1 -OutputDirectory artifacts/file-picker/release` 成功，重新执行锁定恢复及 Application/核心/Windows 门禁、发布 EXE 启动退出冒烟，并生成安装版与便携版目录/ZIP。两种 ZIP 均包含 `PortHarbor.Platform.Windows.Forms.dll`，便携标志仅存在于便携包。
+- 报告和截图位于 ignored `artifacts/file-picker/`，发布门禁报告及产物位于 `release/`。`git diff --check` 通过。
+
+### 边界与下一步
+
+- 选择器测试通过拦截显示调用验证对话框配置及资源释放，UI 使用选择器替身，不自动点击系统文件选择/覆盖提示；仍使用重构前相同的 WinForms 原生实现。真实串口、RDP 登录及 FTPS 等兼容验收仍待完成。
+- 本轮为架构边界收拢，没有改变配置格式、凭据保护或添加新协议。下一步把会话导入导出的合并、ID 分配与敏感数据排除策略迁入 Application，存储适配器继续负责格式读写和原子保存，补齐失败回滚及 JSON/INI 兼容验证。
+
 ## 2026-10-26 - 应用数据路径服务与配置目录边界
 
 ### 本次开发内容与原因

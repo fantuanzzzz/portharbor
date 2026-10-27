@@ -6,6 +6,7 @@ public sealed class MainForm : Form
 {
     readonly Store store;
     readonly ConfigurationService configuration;
+    readonly IFilePicker filePicker;
     readonly RdpLauncher remoteDesktop;
     readonly IPlatformCapabilities capabilities;
     readonly PlatformConnectionPolicy platform;
@@ -19,10 +20,11 @@ public sealed class MainForm : Form
     public MainForm(Store store) : this(store, new ConfigurationService(store, store, store)) { }
     internal MainForm(Store store, ConfigurationService configuration,
         Func<Session, string, Func<string, bool>, ITerminalSession>? createTerminal = null,
-        IRemoteDesktopLauncher? remoteDesktopLauncher = null, IPlatformCapabilities? capabilities = null)
+        IRemoteDesktopLauncher? remoteDesktopLauncher = null, IPlatformCapabilities? capabilities = null, IFilePicker? filePicker = null)
     {
         this.store = store;
         this.configuration = configuration;
+        this.filePicker = filePicker ?? new WindowsFilePicker(this);
         this.capabilities = capabilities ?? new WindowsPlatformCapabilities();
         platform = new PlatformConnectionPolicy(this.capabilities);
         remoteDesktop = new RdpLauncher(remoteDesktopLauncher ?? new WindowsRemoteDesktopLauncher(), store.Paths);
@@ -316,19 +318,20 @@ public sealed class MainForm : Form
         tabs.TabPages.Remove(page); page.Dispose();
         if (tabs.TabCount == 0) Welcome();
     }
-    void Import()
+    void Import() => Import(() => MessageBox.Show(this, "仅导入你信任的会话配置。Shell 会话可在连接时运行其中的命令。\n继续导入？", "导入会话", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes);
+    internal void Import(Func<bool> confirm)
     {
-        using var dialog = new OpenFileDialog { Filter = "PortHarbor 会话 (*.json)|*.json" };
-        if (dialog.ShowDialog(this) == DialogResult.OK)
+        string? file = filePicker.OpenFile(new("PortHarbor 会话 (*.json)|*.json"));
+        if (file != null)
         {
-            if (MessageBox.Show(this, "仅导入你信任的会话配置。Shell 会话可在连接时运行其中的命令。\n继续导入？", "导入会话", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-            int count = configuration.Import(dialog.FileName); RefreshTree(); status.Text = $"已导入 {count} 个会话（不含密码及主机信任记录）";
+            if (!confirm()) return;
+            int count = configuration.Import(file); RefreshTree(); status.Text = $"已导入 {count} 个会话（不含密码及主机信任记录）";
         }
     }
     void Export()
     {
-        using var dialog = new SaveFileDialog { Filter = "PortHarbor 会话 (*.json)|*.json", FileName = "portharbor-sessions.json" };
-        if (dialog.ShowDialog(this) == DialogResult.OK) { configuration.Export(dialog.FileName); status.Text = "会话已导出，不包含密码及主机信任记录"; }
+        string? file = filePicker.SaveFile(new("PortHarbor 会话 (*.json)|*.json", "portharbor-sessions.json"));
+        if (file != null) { configuration.Export(file); status.Text = "会话已导出，不包含密码及主机信任记录"; }
     }
     void Welcome()
     {

@@ -10,6 +10,7 @@
 
 - Application 定义 `IAppDataPaths` 和不可变路径快照，表达便携模式、配置目录/文件、可选旧配置来源和临时目录；存储及 RDP 用例只消费解析结果。
 - `WindowsAppDataPaths` 是 Windows 平台启动解析器，集中处理便携标记/INI 检测、`--portable`/`--installed`、`--data-dir`、安装默认路径 `%LOCALAPPDATA%\PortHarbor`、旧文件 `%LOCALAPPDATA%\EasyConnect\settings.json` 及相对路径绝对化。路径计算无副作用。
+- 2026-10-27 修正：程序目录与显式数据目录的绝对路径使用 `Path.TrimEndingDirectorySeparator` 移除非根目录末尾的分隔符，保留盘符根目录语义。真实 `AppContext.BaseDirectory` 带末尾分隔符，原实现会与配置文件父目录字符串不相等，导致默认便携启动被错误拒绝；配置目录边界校验仍保留。
 - 显式 `--data-dir` 不触发默认用户配置的旧文件迁移；只有隐式安装默认路径暴露旧配置来源。便携模式不暴露迁移源。未知参数或缺少目录值在任何目录写入前拒绝。
 - Infrastructure 的 `Store` 接收并校验绝对路径，确认配置文件位于配置目录内后建立目录；格式适配器继续在首次启动时复制旧 JSON，保存 INI/JSON 及原子替换。旧源只复制、从不删除；已有目标配置优先，不覆盖。
 - `Store.Paths` 在构造时复制为不可变快照。RDP 用例使用同一接口提供的临时目录，Windows 解析器继续把临时文件放在原用户配置目录，保持现有行为。UI 的配置目录入口也从解析路径读取。

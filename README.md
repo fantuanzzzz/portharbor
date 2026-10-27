@@ -98,15 +98,20 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 脚本在项目内缓存构建数据，使用锁定模式恢复依赖，执行差异空白检查、编译、核心/Windows 检查和发布包启动冒烟，然后同时生成安装版目录布局和便携版 ZIP，放在 `artifacts`。默认都不包含 .NET 环境；需要包含时运行 `./build.ps1 -IncludeRuntime`。安装向导尚未实现。依赖版本与哈希见 `src\PortHarbor\packages.lock.json`。
 
+发布冒烟会等待实际 EXE 退出并检查退出码，分别验证隔离数据目录的安装模式，以及不指定 `--data-dir` 的默认便携首次启动和重启；便携模式必须在程序旁创建 INI。报告为 `startup-smoke-results.json`，冒烟生成的空配置不进入发行包。
+
+要测完整 Windows 基线（另含协议回环、WinForms 渲染和 ConPTY 交互），先安装 `tests/requirements.txt` 中的测试依赖，再运行 `./build.ps1 -ExtendedBaseline -OutputDirectory ./artifacts/engineering-baseline`。该入口要求 Python 3.12+、可运行的交互式 Windows 桌面；所有计时与检查数量写入 `engineering-baseline.json`，截图和 UI/协议报告仅位于忽略的 `artifacts` 目录。
+
 若旧发行目录中的程序仍在运行，可通过 `./build.ps1 -OutputDirectory ./artifacts/preview` 输出到独立目录，避免覆盖正在使用的文件。切换新版前先关闭旧程序，同一配置目录不要同时运行两版。
 
 发布回滚可在当前 Windows 用户环境复核：`powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\build-rollback.ps1 -OutputDirectory .\artifacts\rollback-validation`。该检查会在发布替换完成后注入失败，并确认上一版目录和 ZIP 仍然存在。
 
 ```text
 src/PortHarbor.Domain/          无 UI 的会话、诊断、终端状态、Telnet 和文件传输契约
-src/PortHarbor.Application/     无 UI 的会话/配置/文件传输/终端/RDP/路径编排及应用端口
+src/PortHarbor.Application/     无 UI 的会话/配置/导入导出/文件传输/终端/RDP/路径编排及应用端口
 src/PortHarbor.Infrastructure/  Windows 配置存储、凭据、FTP/SFTP 及 SSH/Telnet 适配器
 src/PortHarbor.Platform.Windows/ 能力检测、DPAPI、mstsc、串口、本地 Shell/ConPTY 及串口设备/选项提供器
+src/PortHarbor.Platform.Windows.Forms/ 原生打开/保存文件对话框适配；Application 选择端口不含窗口类型
 src/PortHarbor/                 界面、终端渲染及 Windows 组合入口
 tests/PortHarbor.Application.Checks/  跨平台会话、配置、文件传输及终端生命周期检查
 tests/Shared/                  两个检查项目共用的用例检查与脚本化适配器
@@ -119,7 +124,7 @@ build.ps1                       构建和发布
 
 ## 验证
 
-应用数据路径服务接入后，Application 检查 92 项、核心检查 217 项、Windows 检查 14 项、UI 检查 45 项及协议回环 26 项均通过，完整构建发布和发布 EXE 启动冒烟通过。逐次记录见 [开发日志](docs/DEVELOPMENT-LOG.md)。
+本地诊断消息目录及便携启动修复后，Application 检查 151 项、核心检查 320 项、Windows 检查 14 项及 UI 检查 57 项通过。核心新增默认便携首次启动/重启、显式数据目录末尾分隔符和盘符根目录回归；发布门禁同时覆盖安装与默认便携启动。检查包含消息资源完整性、语言/未知枚举回退、全协议提示脱敏，以及 JSON/INI 交叉格式与原子回滚；协议回环最近一次为文件选择器增量的 26 项通过。逐次记录见 [开发日志](docs/DEVELOPMENT-LOG.md)，当前约定见 [诊断消息](docs/DIAGNOSTICS.md)和[会话配置导入导出](docs/CONFIGURATION-TRANSFER.md)。
 
 RDP 验证覆盖配置、启动失败、进程退出清理及界面重试，不含真实远程桌面登录；串口尚无实体设备测试。FTPS、私钥登录和其他服务器实现也尚未完成实机互通测试。
 

@@ -5,6 +5,7 @@
   <ProjectReference Include="../../src/PortHarbor.Application/PortHarbor.Application.csproj" />
   <ProjectReference Include="../../src/PortHarbor.Infrastructure/PortHarbor.Infrastructure.csproj" />
   <ProjectReference Include="../../src/PortHarbor.Platform.Windows/PortHarbor.Platform.Windows.csproj" />
+  <ProjectReference Include="../../src/PortHarbor.Platform.Windows.Forms/PortHarbor.Platform.Windows.Forms.csproj" />
  </ItemGroup>
  <ItemGroup><None Update="Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
  <ItemGroup><Compile Include="../Shared/*.cs" Link="Shared/%(Filename)%(Extension)" /></ItemGroup>

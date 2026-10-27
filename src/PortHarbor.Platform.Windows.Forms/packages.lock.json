@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net8.0-windows7.0": {
+      "portharbor.application": {
+        "type": "Project",
+        "dependencies": {
+          "PortHarbor.Domain": "[1.0.0, )"
+        }
+      },
+      "portharbor.domain": {
+        "type": "Project"
+      }
+    },
+    "net8.0-windows7.0/win-x64": {}
+  }
+}

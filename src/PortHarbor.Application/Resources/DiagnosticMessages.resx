@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <data name="Error_None" xml:space="preserve"><value></value></data>
+  <data name="Error_Cancelled" xml:space="preserve"><value>已取消</value></data>
+  <data name="Error_InvalidConfiguration" xml:space="preserve"><value>配置无效</value></data>
+  <data name="Error_AuthenticationFailed" xml:space="preserve"><value>身份验证失败</value></data>
+  <data name="Error_HostKeyRejected" xml:space="preserve"><value>主机密钥未接受</value></data>
+  <data name="Error_NetworkUnavailable" xml:space="preserve"><value>网络不可用</value></data>
+  <data name="Error_Timeout" xml:space="preserve"><value>操作超时</value></data>
+  <data name="Error_PermissionDenied" xml:space="preserve"><value>权限不足</value></data>
+  <data name="Error_PlatformUnavailable" xml:space="preserve"><value>平台资源不可用</value></data>
+  <data name="Error_ProtocolError" xml:space="preserve"><value>协议操作失败</value></data>
+  <data name="Error_Unknown" xml:space="preserve"><value>未知错误</value></data>
+  <data name="Stage_None" xml:space="preserve"><value></value></data>
+  <data name="Stage_Validation" xml:space="preserve"><value>正在检查配置</value></data>
+  <data name="Stage_Connecting" xml:space="preserve"><value>正在连接</value></data>
+  <data name="Stage_Authenticating" xml:space="preserve"><value>正在验证身份</value></data>
+  <data name="Stage_HostKeyVerification" xml:space="preserve"><value>正在验证主机密钥</value></data>
+  <data name="Stage_OpeningChannel" xml:space="preserve"><value>正在打开通道</value></data>
+  <data name="Stage_Reading" xml:space="preserve"><value>正在读取</value></data>
+  <data name="Stage_Writing" xml:space="preserve"><value>正在写入</value></data>
+  <data name="Stage_Closing" xml:space="preserve"><value>正在关闭</value></data>
+  <data name="Stage_LaunchingClient" xml:space="preserve"><value>正在启动远程桌面客户端</value></data>
+  <data name="State_Created" xml:space="preserve"><value>连接异常</value></data>
+  <data name="State_Connecting" xml:space="preserve"><value>正在连接</value></data>
+  <data name="State_Connected" xml:space="preserve"><value>已连接</value></data>
+  <data name="State_Closing" xml:space="preserve"><value>连接异常</value></data>
+  <data name="State_Closed" xml:space="preserve"><value>已关闭</value></data>
+  <data name="State_Failed" xml:space="preserve"><value>连接异常</value></data>
+  <data name="ReadyToConnect" xml:space="preserve"><value>准备连接</value></data>
+  <data name="ExternalDesktopStarted" xml:space="preserve"><value>已启动 Windows 远程桌面客户端</value></data>
+  <data name="StatusErrorFormat" xml:space="preserve"><value>{0}（{1}）</value></data>
+  <data name="OperationFormat" xml:space="preserve"><value>{0}。操作编号：{1}</value></data>
+</root>

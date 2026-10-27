@@ -1,11 +1,9 @@
 namespace PortHarbor;
 
-public interface IConfigurationRepository : ISessionRepository
+public interface IConfigurationRepository : ISessionRepository, IConfigurationTransfer
 {
     IReadOnlyList<string> GetGroups();
     void AddGroup(string name);
-    void Export(string path);
-    int Import(string path);
 }
 
 public interface IVault
@@ -30,6 +28,7 @@ public sealed class ConfigurationService : ISessionRepository, IHostKeyTrust
     readonly IVault vault;
     readonly IHostKeyTrust hostKeyTrust;
     readonly SessionService sessions;
+    readonly ConfigurationTransferService transfers;
 
     public ConfigurationService(IConfigurationRepository repository, IVault vault, IHostKeyTrust hostKeyTrust)
     {
@@ -37,6 +36,7 @@ public sealed class ConfigurationService : ISessionRepository, IHostKeyTrust
         this.vault = vault ?? throw new ArgumentNullException(nameof(vault));
         this.hostKeyTrust = hostKeyTrust ?? throw new ArgumentNullException(nameof(hostKeyTrust));
         sessions = new SessionService(repository);
+        transfers = new ConfigurationTransferService(repository);
     }
 
     public IReadOnlyList<Session> GetSessions() => sessions.GetSessions();
@@ -44,8 +44,8 @@ public sealed class ConfigurationService : ISessionRepository, IHostKeyTrust
     public void SaveSession(Session session, string password) => sessions.Save(session, password);
     public void DeleteSession(Guid id) => sessions.Delete(id);
     public void AddGroup(string name) => repository.AddGroup(name);
-    public void Export(string path) => repository.Export(path);
-    public int Import(string path) => repository.Import(path);
+    public void Export(string path) => transfers.Export(path);
+    public int Import(string path) => transfers.Import(path);
     public bool HasMasterPassword => vault.HasMasterPassword;
     public bool HasSavedCredentials => vault.HasSavedCredentials;
     public bool IsVaultUnlocked => vault.IsUnlocked;

@@ -12,7 +12,7 @@ internal static partial class Program
         foreach (bool portable in new[] { false, true })
         {
             string mode = portable ? "INI" : "JSON";
-            using var store = new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root, "adapters-" + mode), false));
+            using var store = new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root, "adapters-" + mode), portable));
             var service = new ConfigurationService(store, store, store);
             var original = new Session { Name = "Existing", Host = "existing.invalid" };
             service.SaveSession(original, "");
@@ -57,7 +57,7 @@ internal static partial class Program
             var exported = JsonSerializer.Deserialize<AppData>(File.ReadAllText(exportPath), Store.Json)!;
             Check(exported.Sessions.Count == 2 && exported.Groups.Contains("Imported/Empty") && exported.Credentials.Count == 0
                 && exported.HostKeys.Count == 0 && exported.Vault == null, mode + " export preserves sessions and empty groups without credential or trust state");
-            using var restarted = new Store(new WindowsSecretProtector(), TestPaths(store.DirectoryPath, false));
+            using var restarted = new Store(new WindowsSecretProtector(), TestPaths(store.DirectoryPath, portable));
             Check(restarted.GetSessions().SequenceEqual(service.GetSessions()) && restarted.GetGroups().SequenceEqual(service.GetGroups())
                 && restarted.CheckHostKey("confirmed.invalid", 22, "SHA256:confirmed", _ => throw new Exception("must not prompt")),
                 mode + " adapter restart preserves imported sessions and separately confirmed host trust");
