@@ -66,6 +66,7 @@ internal static partial class Program
                 await TelnetRoundTrip(root); await Integration(root, configPath); await SshRoundTrip(root, configPath);
                 await SshFailureDiagnostics(root, configPath);
                 await TerminalNetworkCancellation(root);
+                await TerminalNetworkFailures(root, configPath);
             }
             else
             {

@@ -4,6 +4,29 @@ This workbook records every development session. Each entry covers what changed,
 
 本文档保留历史开发与验证记录；各条目的“下一步”表示当时的安排。当前阶段状态、任务勾选及验收条件统一维护在[技术方案第 8 节](TECHNICAL-PLAN.md#8-分阶段实施)，文件传输当前契约见[文件传输约定](FILE-TRANSFER.md)。历史条目不随当前实现变化而回写。
 
+## 2026-10-27 - SSH 突然掉线清理与 FTP 连接失败阶段
+
+### 问题与实现
+
+- 新增真实 loopback 对照用例，复现 SSH 底层连接断开后 ShellStream 同步读取在 10 秒检查期限内仍未退出；正常 Shell 退出原本可完成。修复 `SshTerminalTransport`：建连后保存客户端 ErrorOccurred 的原异常并请求中止，释放流及客户端以解除阻塞，通道创建/读取优先传回原始连接故障；应用层完成关闭且保留安全失败提示。
+- `DiagnosticClassifier` 明确将 SSH.NET 的 ConnectionLost 归类为可重试网络故障，密钥交换失败继续归为协议错误。不新增自动重连或输入重放，主动取消仍保持原流程。
+- 连接拒绝回归暴露 FTP 在 TCP 建立前就报告 Authenticating。改为初始 Connecting；库明确抛出 FtpAuthenticationException 后标注 Authenticating，分类器单独识别认证错误，避免拒绝连接与密码错误混淆。
+- 新增 `NetworkFailureChecks.cs` 并接入既有 `--integration`，覆盖四种协议拒绝连接、FTP 错误密码、SSH 正常 Shell 退出/传输连接丢失、Telnet 正常 EOF/TCP reset。用绑定但不监听的端口避免端口释放竞态；reset 直接关闭零 linger socket，避免 TcpClient.Dispose 的正常关闭掩盖重置。
+- Python fixture 增加仅测试使用的正常 Shell 退出和突然断开命令；不进入发行包。核心新增 SSH 连接丢失/密钥交换、HostNotFound 和 FTP 认证类型分类检查，均不解析原始异常消息。
+
+### 验证与交付
+
+- 在当前 Windows 用户桌面环境运行 `build.ps1 -ExtendedBaseline -OutputDirectory artifacts/network-failures/release`，锁定恢复、Release 构建、协议/UI/ConPTY 与发布完整通过，0 警告、0 错误。
+- Application 151、核心 324、Windows 14、协议 37、UI 57 项通过，共 583 项检查；ConPTY 标记、安装隔离启动、默认便携首次启动与重启四项冒烟均通过。报告、截图、终端输出和两个框架依赖 ZIP 在 ignored `artifacts/network-failures/release/`。
+- 先前未修复版本的协议检查报告在 `artifacts/network-failures/integration-before-fix.json`，记录正常 SSH 退出通过、随后连接丢失读取超时；最终报告验证该问题已解除且取消/正常退出未误报。
+- 更新 README、文档索引、技术方案及终端/诊断/文件传输约定。未改配置格式、用户配置或依赖版本，也未覆盖既有即用自包含便携目录。
+
+### 遗留与下一步
+
+- 本轮是当前工作区完整验收，不冒充新增提交的干净克隆验收，也没有重跑自包含分支或发布回滚故障注入。
+- 真实 DNS 失败只有类型分类检查；静默丢包、远端无响应时长、文件传输中断线、真实串口与生产服务器互通仍待专项验证。SSH 的同步 Shell API 仍依赖关闭所属资源解除阻塞，不表示底层全部原生异步化。
+- 下一步补齐 FTP/SFTP 上传或下载中途断线，验证错误阶段、旧目标内容保留、临时文件清理和关闭等待。
+
 ## 2026-10-27 - 独立干净 checkout 验收及协议失败日志归档
 
 ### 验收对象与结果

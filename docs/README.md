@@ -28,6 +28,8 @@
 
 导入导出业务策略已迁入 Application；分类合并、新 ID 分配及敏感字段排除可脱离 Windows 检查，存储适配器保留原格式与原子保存。
 
+最新增量修复 SSH 突然掉线后读取不结束的问题及 FTP 连接阶段误标，当前工作区完整扩展基线通过 Application 151、核心 324、Windows 14、协议 37、UI 57 项，共 583 项，另有四项冒烟通过。正常退出与取消继续保持原行为；下一步验证文件上传/下载中途断线。
+
 提交 `e110c4e` 已在 Windows 本机独立干净克隆和空构建/依赖缓存下完成扩展基线：Application 151 项、核心 320 项、Windows 14 项、协议回环 26 项、WinForms UI 57 项全部通过；ConPTY 及三项发布启动冒烟通过。默认便携首次启动与重启不指定数据目录，并检查 EXE 退出码和 INI 创建。记录及环境限制见[开发日志](DEVELOPMENT-LOG.md)。
 
 阶段 0 的扩展基线可用 `build.ps1 -ExtendedBaseline` 纳入协议回环、WinForms UI 和 ConPTY；`engineering-baseline.json` 记录各入口与发布流程的耗时及检查数量，不是代码行覆盖率报告。协议集成失败时 fixture 日志留在本地报告目录。发布故障注入与回滚范围、另一台机器复现、真实串口设备、真实 RDP 登录、FTPS、私钥登录和多种生产服务器兼容性仍需专项验收；原 Temp 克隆中的 FTP 550 根因尚未确认。

@@ -18,6 +18,14 @@ internal static partial class Program
             "explicit host key rejection keeps its category regardless of stage");
         Check(DiagnosticClassifier.Classify(new SshException("private protocol details"), ConnectionStage.Connecting) == ConnectionErrorCode.ProtocolError,
             "SSH handshake failure is classified as a protocol error");
+        Check(DiagnosticClassifier.Classify(new SshConnectionException("private lost endpoint", Renci.SshNet.Messages.Transport.DisconnectReason.ConnectionLost), ConnectionStage.Reading) == ConnectionErrorCode.NetworkUnavailable,
+            "SSH connection loss is classified as a network failure without parsing its message");
+        Check(DiagnosticClassifier.Classify(new SshConnectionException("private key exchange", Renci.SshNet.Messages.Transport.DisconnectReason.KeyExchangeFailed), ConnectionStage.Connecting) == ConnectionErrorCode.ProtocolError,
+            "SSH key exchange failure retains its protocol category");
+        Check(DiagnosticClassifier.Classify(new SocketException((int)SocketError.HostNotFound), ConnectionStage.Connecting) == ConnectionErrorCode.NetworkUnavailable,
+            "host resolution failure is classified as a network error without external DNS");
+        Check(DiagnosticClassifier.Classify(new FluentFTP.Exceptions.FtpAuthenticationException("530", "private password"), ConnectionStage.Connecting) == ConnectionErrorCode.AuthenticationFailed,
+            "FTP authentication failure keeps its category independently of the connection stage");
 
         foreach (var protocol in Enum.GetValues<Protocol>())
         {

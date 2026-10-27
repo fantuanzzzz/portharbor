@@ -9,14 +9,19 @@ internal sealed class FtpRemoteFileSystem(Session session, string password) : IR
 
     public async Task ConnectAsync(Action<ConnectionStage> reportStage, CancellationToken token)
     {
-        reportStage(ConnectionStage.Authenticating);
+        reportStage(ConnectionStage.Connecting);
         client = new AsyncFtpClient(session.Host, session.Username, password, session.Port);
         client.Config.EncryptionMode = session.UseTls ? FtpEncryptionMode.Explicit : FtpEncryptionMode.None;
         client.Config.DataConnectionType = FtpDataConnectionType.AutoPassive;
         client.Config.ConnectTimeout = 15000;
         client.Config.ReadTimeout = 35000;
         client.Config.DataConnectionReadTimeout = 35000;
-        await client.Connect(token).ConfigureAwait(false);
+        try { await client.Connect(token).ConfigureAwait(false); }
+        catch (FluentFTP.Exceptions.FtpAuthenticationException)
+        {
+            reportStage(ConnectionStage.Authenticating);
+            throw;
+        }
     }
 
     public async Task<IReadOnlyList<RemoteEntry>> ListAsync(string path, CancellationToken token)

@@ -20,7 +20,15 @@ class Auth(paramiko.ServerInterface):
         def shell():
             try:
                 channel.send(b'SSH_TEST_READY\r\n')
-                while data:=channel.recv(4096): channel.send(b'ECHO:'+data)
+                received=b''
+                while data:=channel.recv(4096):
+                    received=(received+data)[-64:]
+                    if received==b'PORTHARBOR_TEST_EXIT\n':
+                        channel.send_exit_status(0); channel.shutdown_write(); channel.close(); return
+                    if received==b'PORTHARBOR_TEST_DROP\n':
+                        transport=channel.get_transport()
+                        transport.sock.shutdown(socket.SHUT_RDWR); transport.close(); return
+                    channel.send(b'ECHO:'+data)
             except Exception: pass
         threading.Thread(target=shell,daemon=True).start(); return True
 class Sftp(paramiko.SFTPServerInterface):

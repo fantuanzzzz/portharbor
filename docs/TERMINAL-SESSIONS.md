@@ -22,9 +22,12 @@
 6. 传输适配器属于会话用例。`Abort` 必须线程安全、幂等且快速返回，通过关闭底层资源解除阻塞；`DisposeAsync` 才等待资源清理和启动结束。实现不能在关闭后留下刚创建的流或客户端。
 7. SSH 使用原生 `ConnectAsync`；SSH.NET 的 shell channel 创建/读取与 Windows 同步管道仍使用工作线程，取消依赖关闭其所属客户端或句柄，并不意味着所有底层 API 都支持原生异步取消。
 8. 网络连接仍采用现有库和系统的超时设置，本轮没有新增用户可配置的终端连接/读写超时或自动重连。串口阻塞、FTPS、私钥及多服务器兼容性仍需各自实机验收。
+9. SSH 建连后监听客户端 `ErrorOccurred`，先保留原始异常再请求非阻塞中止，释放所有者以解除 ShellStream 阻塞读取；读取/通道创建因清理而失败时优先传回原始连接错误。`ConnectionLost` 归为可重试的网络故障，密钥交换等协议错误保持协议类别。正常 Shell EOF 不作为网络故障，主动取消仍走取消流程；可重试标志不触发自动重连或重放输入。
 
 ## 验证
 
 `tests/Shared/TerminalSessionChecks.cs` 注入脚本化端口，在独立 `net8.0` 检查和 Windows 核心检查中共同验证输入顺序、分片 UTF-8、取消、晚启动、写入阻塞、异常及异步释放。Windows 核心检查另行核验真实流适配器的晚资源释放；UI 检查覆盖关闭标签和退出软件时等待终端清理。
 
-协议回环检查验证 SSH 认证、主机指纹、PTY、输入和断开，Telnet 协商与远端断开，以及 SSH 服务不发握手 banner、Telnet 服务不发数据时的取消。ConPTY 检查验证本地 Shell 输入、输出、resize、正常退出及关闭空闲进程。平台检查核验分层依赖、协议工厂拒绝、预取消和编辑器设备/选项注入；串口实机互通仍待验收。运行命令见 [README](../README.md#验证)。
+协议回环检查验证 SSH 认证、主机指纹、PTY、输入和断开，Telnet 协商与远端断开，以及 SSH 服务不发握手 banner、Telnet 服务不发数据时的取消。`NetworkFailureChecks.cs` 另行对照 SSH 正常 Shell 退出/连接突然断开、Telnet 正常 EOF/TCP reset，并验证 SSH、Telnet、FTP、SFTP 连接被拒绝的诊断及清理。TCP reset 直接以零 linger 关闭服务端 socket，避免 TcpClient.Dispose 的正常关闭掩盖重置；这些用例均只访问 loopback。
+
+ConPTY 检查验证本地 Shell 输入、输出、resize、正常退出及关闭空闲进程。平台检查核验分层依赖、协议工厂拒绝、预取消和编辑器设备/选项注入；串口实机互通仍待验收。运行命令见 [README](../README.md#验证)。

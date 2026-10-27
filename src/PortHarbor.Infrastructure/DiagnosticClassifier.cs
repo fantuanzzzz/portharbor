@@ -6,6 +6,7 @@ public static class DiagnosticClassifier
     {
         if (error is HostKeyRejectedException) return ConnectionErrorCode.HostKeyRejected;
         if (error is Renci.SshNet.Common.SshAuthenticationException) return ConnectionErrorCode.AuthenticationFailed;
+        if (error is FluentFTP.Exceptions.FtpAuthenticationException) return ConnectionErrorCode.AuthenticationFailed;
         if (error is Renci.SshNet.Common.SshOperationTimeoutException) return ConnectionErrorCode.Timeout;
         if (error is OperationCanceledException) return ConnectionErrorCode.Cancelled;
         if (error is ArgumentException or InvalidDataException) return ConnectionErrorCode.InvalidConfiguration;
@@ -18,6 +19,8 @@ public static class DiagnosticClassifier
             var innerCode = Classify(error.InnerException, ConnectionStage.None);
             if (innerCode != ConnectionErrorCode.Unknown) return innerCode;
         }
+        if (error is Renci.SshNet.Common.SshConnectionException { DisconnectReason: Renci.SshNet.Messages.Transport.DisconnectReason.ConnectionLost })
+            return ConnectionErrorCode.NetworkUnavailable;
         if (error is Renci.SshNet.Common.SshException) return ConnectionErrorCode.ProtocolError;
         if (stage == ConnectionStage.HostKeyVerification) return ConnectionErrorCode.HostKeyRejected;
         if (stage == ConnectionStage.Authenticating) return ConnectionErrorCode.AuthenticationFailed;

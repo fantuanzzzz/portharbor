@@ -22,6 +22,13 @@ Domain 的 `ConnectionDiagnostic` 保存稳定 OperationId、协议、状态、�
 
 示例：`正在验证身份（身份验证失败）。操作编号：01234567`。未知数值枚举得到稳定的“连接异常（未知错误）”等回退，不插入枚举数值或原始 Message。
 
+## 网络故障分类
+
+- Socket 连接被拒绝、主机解析失败及包装在 I/O 异常中的连接重置均按类型归为 `NetworkUnavailable`，不读取异常文本。主机解析失败当前只有分类检查，不代表执行过外部 DNS 互通验收。
+- SSH.NET `SshConnectionException` 的 `DisconnectReason.ConnectionLost` 归为网络故障；密钥交换等其他 SSH 异常继续归为协议错误。已连接的 SSH 突然失去底层连接时，适配器解除阻塞读取，应用层保留读取阶段失败和操作编号，完成关闭。
+- FTP 的 Connect 包含 TCP 连接及登录：初始阶段为 `Connecting`；捕获明确的 `FtpAuthenticationException` 后标注 `Authenticating`，错误类别为 `AuthenticationFailed`。TCP 连接拒绝不再误标认证阶段，密码错误不作为可重试网络错误。
+- 正常 SSH Shell 退出和 Telnet EOF 不发布失败；主动取消保持 `Cancelled`。可重试性只是诊断元数据，不表示自动重连。
+
 ## 安全与维护
 
 - 呈现不读取原始 Message、端点、路径或终端内容；错误分类继续依据异常类型和阶段，不能靠解析异常文本决定文案。
@@ -34,6 +41,7 @@ Domain 的 `ConnectionDiagnostic` 保存稳定 OperationId、协议、状态、�
 
 - `tests/Shared/DiagnosticMessageChecks.cs`：独立 Application 和核心检查共用，验证目录完整性、语言回退、状态优先级、未知值及七种协议的组合脱敏。
 - `tests/PortHarbor.Checks/DiagnosticChecks.cs`：厂商异常分类、原始消息脱敏及真实协议失败诊断。
+- `tests/PortHarbor.Checks/NetworkFailureChecks.cs`：四种网络协议的拒绝连接、FTP 错误密码、SSH 正常退出/连接丢失和 Telnet 正常 EOF/TCP reset。
 - `tests/PortHarbor.Checks/DiagnosticUiChecks.cs`：后台 UI 更新、失败保留/清除、未知诊断回退、操作编号和实际终端/RDP 页面。
 
 本轮验证及发布记录见[开发日志](DEVELOPMENT-LOG.md)。
