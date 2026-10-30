@@ -59,7 +59,7 @@ public sealed partial class MainForm : Form
         Item(file, "导入会话…", Import); Item(file, "导出会话…", Export);
         file.DropDownItems.Add(new ToolStripSeparator()); Item(file, "退出", Close);
         var sessionsMenu = Menu("会话");
-        Item(sessionsMenu, "新建连接…", () => Edit(null)); Item(sessionsMenu, "新建根分类…", () => NewGroup(false)); Item(sessionsMenu, "新建子分类…", NewGroup);
+        Item(sessionsMenu, "新建连接…", () => Edit(null)); Item(sessionsMenu, "新建分类…", NewGroup);
         sessionsMenu.DropDownItems.Add(new ToolStripSeparator());
         Item(sessionsMenu, "连接", ConnectSelected); Item(sessionsMenu, "编辑…", () => { if (Selected is { } session) Edit(session); }); Item(sessionsMenu, "删除会话及其密码…", Delete);
         AddLibraryMenuItems(sessionsMenu.DropDownItems);
@@ -102,9 +102,9 @@ public sealed partial class MainForm : Form
         search.TextChanged += (_, _) => RefreshTree();
         tree.NodeMouseDoubleClick += (_, _) => Guard(ConnectSelected);
         tree.NodeMouseClick += (_, e) => tree.SelectedNode = e.Node;
+        tree.MouseDown += (_, e) => { if (e.Button == MouseButtons.Right && tree.GetNodeAt(e.Location) == null) tree.SelectedNode = tree.Nodes["UserSessionsRoot"]; };
         var context = new ContextMenuStrip();
-        context.Items.Add("新建根分类", null, (_, _) => Guard(() => NewGroup(false)));
-        context.Items.Add("新建子分类", null, (_, _) => Guard(NewGroup));
+        context.Items.Add("新建分类", null, (_, _) => Guard(NewGroup));
         context.Items.Add("新建会话", null, (_, _) => Guard(() => Edit(null)));
         context.Items.Add("连接", null, (_, _) => Guard(ConnectSelected));
         context.Items.Add("编辑", null, (_, _) => { if (Selected is { } s) Guard(() => Edit(s)); });
@@ -178,12 +178,15 @@ public sealed partial class MainForm : Form
         var favorites = activity.Favorites.ToHashSet();
         var recentAttempts = activity.Recent.ToDictionary(r => r.SessionId);
         tree.BeginUpdate(); tree.Nodes.Clear();
+        var userSessions = tree.Nodes.Add("UserSessionsRoot", "User sessions", "folder", "folder");
+        userSessions.ToolTipText = "用户会话库；选择此处可新建顶层分类。";
+        tree.SelectedNode = userSessions;
         var folders = new Dictionary<string, TreeNode>(StringComparer.OrdinalIgnoreCase);
         TreeNode Folder(string path)
         {
             if (folders.TryGetValue(path, out var existing)) return existing;
             int separator = path.LastIndexOf('/');
-            var nodes = separator < 0 ? tree.Nodes : Folder(path[..separator]).Nodes;
+            var nodes = separator < 0 ? userSessions.Nodes : Folder(path[..separator]).Nodes;
             var node = nodes.Add(separator < 0 ? path : path[(separator + 1)..]);
             node.Tag = path; node.ImageKey = node.SelectedImageKey = "folder"; node.ToolTipText = path;
             folders[path] = node;
@@ -197,7 +200,7 @@ public sealed partial class MainForm : Form
         foreach (var session in library.Sessions)
         {
             string group = SessionLibrary.Group(session);
-            var nodes = libraryView == SessionLibraryView.Recent ? tree.Nodes : Folder(group).Nodes;
+            var nodes = libraryView == SessionLibraryView.Recent ? userSessions.Nodes : Folder(group).Nodes;
             var node = nodes.Add($"{(favorites.Contains(session.Id) ? "★ " : "")}{session.Name}  ·  {session.Protocol}" + (libraryView == SessionLibraryView.Recent ? $"  ·  {group}" : ""));
             node.Tag = session; node.ImageKey = node.SelectedImageKey = session.Protocol is Protocol.FTP or Protocol.SFTP ? "files" : session.Protocol == Protocol.RDP ? "desktop" : "terminal";
             recentAttempts.TryGetValue(session.Id, out var recent);
@@ -210,11 +213,10 @@ public sealed partial class MainForm : Form
             : libraryView == SessionLibraryView.Favorites ? "暂无收藏；右键会话选择收藏。" : libraryView == SessionLibraryView.Recent ? "暂无最近连接；连接已保存会话后显示。" : "暂无会话；点击新建连接开始。";
         UpdateWorkspaceActions();
     }
-    void NewGroup() => NewGroup(true);
-    void NewGroup(bool nested)
+    void NewGroup()
     {
-        string? parent = nested ? Selected?.Group ?? tree.SelectedNode?.Tag as string ?? tree.SelectedNode?.Parent?.Tag as string : null;
-        string? name = TextPrompt.Ask(this, "新建分类", parent == null ? "根分类名称（不含 /）" : $"在 {parent} 下新建子分类（不含 /）");
+        string? parent = Selected?.Group ?? tree.SelectedNode?.Tag as string;
+        string? name = TextPrompt.Ask(this, "新建分类", parent == null ? "在 User sessions 下新建分类（不含 /）" : $"在 {parent} 下新建分类（不含 /）");
         if (name == null) return;
         if (name.Contains('/') || name.Contains('\\')) throw new ArgumentException("单个分类名称不能包含路径分隔符。");
         string path = parent == null ? name.Trim() : parent + "/" + name.Trim();
@@ -261,13 +263,14 @@ public sealed partial class MainForm : Form
     }
     void Edit(Session? session, bool copying = false)
     {
-        if (session == null) session = new Session { Group = Selected?.Group ?? tree.SelectedNode?.Tag as string ?? (tree.SelectedNode?.Parent?.Tag as string) ?? "默认" };
+        bool creating = session == null || copying || !configuration.GetSessions().Any(saved => saved.Id == session.Id);
+        if (session == null) session = new Session { Name = "", Group = Selected?.Group ?? tree.SelectedNode?.Tag as string ?? "默认" };
         // Editing an existing saved credential must not replace it with an empty locked-vault value.
         if (session.SavePassword && configuration.GetSessions().Any(s => s.Id == session.Id && s.SavePassword)
             && !configuration.IsVaultUnlocked && !EnsureVault())
         { status.Text = "未编辑：请先解锁密码库，以保留会话密码"; return; }
         string password = session is { SavePassword: true } && configuration.IsVaultUnlocked ? configuration.GetPassword(session.Id) : "";
-        using var editor = new SessionEditor(session, password, configuration.GetGroups().Concat(configuration.GetSessions().Select(s => s.Group)), capabilities: capabilities);
+        using var editor = new SessionEditor(session, password, configuration.GetGroups().Concat(configuration.GetSessions().Select(s => s.Group)), capabilities: capabilities, creating: creating);
         if (editor.ShowDialog(this) != DialogResult.OK) return;
         if (editor.Persist) { if (editor.Result.SavePassword && editor.Password.Length > 0 && !EnsureVault()) return; configuration.SaveSession(editor.Result, editor.Password); RevealSavedSession(editor.Result.Id); status.Text = $"已保存：{editor.Result.Name}" + (copying ? "（新会话不复制收藏、最近记录或已保存密码）" : ""); }
         if (editor.ConnectNow) Connect(editor.Result, editor.Password);
@@ -277,6 +280,7 @@ public sealed partial class MainForm : Form
         if (Selected is not { } selected) return;
         var s = configuration.GetSessions().FirstOrDefault(s => s.Id == selected.Id);
         if (s == null) { RefreshTree(); status.Text = "此会话已不存在，请重新选择"; return; }
+        s.Validate(requireAuthentication: true);
         if (!platform.GetAvailability(s.Protocol).IsAvailable) { Connect(s, ""); return; }
         string password = "";
         if (s.SavePassword) { if (!configuration.IsVaultUnlocked) { MessageBox.Show(this, "当前未解锁主密码，请手动输入本次密码。", "密码库未解锁", MessageBoxButtons.OK, MessageBoxIcon.Information); } else password = configuration.GetPassword(s.Id); }
@@ -310,7 +314,7 @@ public sealed partial class MainForm : Form
     internal void Connect(Session session, string password)
     {
         if (shutdownPending) return;
-        session.Validate();
+        session.Validate(requireAuthentication: true);
         var page = new TabPage(session.Name) { BackColor = Color.White, Tag = session }; tabs.TabPages.Add(page); tabs.SelectedTab = page;
         OpenConnection(page, session, password);
         UiTheme.Refresh(page);
@@ -492,7 +496,7 @@ public sealed partial class MainForm : Form
         foreach (var p in Enum.GetValues<Protocol>())
         {
             var button = new UiButton { Kind = UiButtonKind.Card, Text = p == Protocol.Shell ? "Shell\n本地命令行" : p == Protocol.Serial ? "Serial\n串口终端" : p == Protocol.RDP ? "RDP\n远程桌面" : p + "\n" + (p is Protocol.FTP or Protocol.SFTP ? "文件传输" : "远程终端"), Size = new Size(145, 66), Margin = new Padding(0, 0, UiTheme.Inset, UiTheme.Inset) };
-            button.Click += (_, _) => Guard(() => Edit(new Session { Name = p == Protocol.Shell ? "本地 Shell" : "新 " + p + " 会话", Protocol = p, Port = Session.DefaultPort(p) })); choices.Controls.Add(button);
+            button.Click += (_, _) => Guard(() => Edit(new Session { Name = "", Group = Selected?.Group ?? tree.SelectedNode?.Tag as string ?? "默认", Protocol = p, Port = Session.DefaultPort(p) })); choices.Controls.Add(button);
         }
         flow.Controls.Add(choices);
         flow.Controls.Add(new Label { Text = "从左侧会话库双击连接，或选择上方连接类型开始。\n\n保存密码需设置主密码；安装版另外使用 Windows 用户级加密。\n导出的会话不包含密码。Telnet 与普通 FTP 不加密流量。", AutoSize = true, ForeColor = Color.SlateGray, Margin = new Padding(0, 16, 0, 0) });

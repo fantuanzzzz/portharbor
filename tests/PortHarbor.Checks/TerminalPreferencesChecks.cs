@@ -80,7 +80,8 @@ internal static partial class Program
             timer.Tick += (_, _) =>
             {
                 timer.Stop();
-                try { interact(dialog); } catch (Exception error) { failure = error; }
+                try { interact(dialog); }
+                catch (Exception error) { failure = error; }
                 finally { if (!dialog.IsDisposed && dialog.Visible) dialog.Close(); }
             };
             timer.Start(); dialog.ShowDialog(owner); if (failure != null) throw failure;
@@ -113,7 +114,7 @@ internal static partial class Program
             });
         using var form = new MainForm(store, new ConfigurationService(store, store, store), (s, _, _) => new UnreportedTerminalFailure());
         form.Show(); Application.DoEvents();
-        form.Connect(new Session { Host = "fixture.invalid" }, "");
+        form.Connect(new Session { Host = "fixture.invalid", Username = "operator" }, "");
         var tabs = FindControl<TabControl>(form); var first = FindControl<TerminalView>(tabs.SelectedTab!);
         Check(first.Font.Size == 17 && first.PasteOnRightClick, "a main window terminal loads persisted global defaults");
         first.ApplyPreferences(new TerminalPreferences { FontSize = 20 });
@@ -126,7 +127,7 @@ internal static partial class Program
             Descendants(dialog).OfType<NumericUpDown>().Single().Value = 12; Button(dialog, "Save").PerformClick();
         };
         dialogTimer.Start(); settingItem.PerformClick();
-        form.Connect(new Session { Host = "fixture.invalid" }, "");
+        form.Connect(new Session { Host = "fixture.invalid", Username = "operator" }, "");
         var second = FindControl<TerminalView>(tabs.SelectedTab!);
         Check(first.Font.Size == 20 && second.Font.Size == 12 && new TerminalPreferencesRepository(store.Paths).Load().FontSize == 12,
             "global changes affect new tabs while an existing tab retains its temporary override");

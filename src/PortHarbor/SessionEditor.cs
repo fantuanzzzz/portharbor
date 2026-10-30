@@ -32,20 +32,20 @@ public sealed class SessionEditor : Form
     bool validationStarted;
 
     public SessionEditor(Session? session = null, string secret = "", IEnumerable<string>? groups = null, ISerialPortProvider? serialPorts = null,
-        IPlatformCapabilities? capabilities = null, IFilePicker? filePicker = null, IFolderPicker? folderPicker = null)
+        IPlatformCapabilities? capabilities = null, IFilePicker? filePicker = null, IFolderPicker? folderPicker = null, bool creating = false)
     {
-        original = (session ?? new()) with { }; Result = original with { };
+        original = (session ?? new() { Name = "" }) with { }; Result = original with { };
         var windowsPicker = new WindowsFilePicker(this);
         this.filePicker = filePicker ?? windowsPicker; this.folderPicker = folderPicker ?? windowsPicker;
         serialPorts ??= new WindowsSerialPortProvider();
         platform = new PlatformConnectionPolicy(capabilities ?? new WindowsPlatformCapabilities());
-        Text = session == null ? "新建连接" : "编辑会话";
+        Text = session == null || creating ? "新建连接" : "编辑会话";
         UiTheme.AttachDialog(this);
         Size = new Size(720, 790); MinimumSize = new Size(570, 500); StartPosition = FormStartPosition.CenterParent;
         fields.Padding = new Padding(18); advanced.Padding = new Padding(0, 4, 0, 0);
         scroll.Controls.Add(fields);
         AddHeading("基本设置", "BasicHeading");
-        AddText("Name", "会话名称", original.Name);
+        AddText("Name", "会话名称（可选）", original.Name);
         var group = new ComboBox { DropDownStyle = ComboBoxStyle.DropDown };
         group.Items.AddRange((groups ?? []).Append("默认").Append(original.Group).Where(g => !string.IsNullOrWhiteSpace(g)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(g => g).Cast<object>().ToArray());
         group.Text = original.Group; Add("Group", "分类路径", group);
@@ -180,6 +180,13 @@ public sealed class SessionEditor : Form
             pair.label.Visible = pair.field.Visible = visible;
         }
         if (p is not (Protocol.SSH or Protocol.SFTP or Protocol.FTP or Protocol.RDP)) showPassword.Checked = false;
+        rows["Username"].label.Text = inputs["Username"].AccessibleName = p is Protocol.SSH or Protocol.SFTP ? "用户名（必填）" : "用户名（可选）";
+        ((TextBox)inputs["Name"]).PlaceholderText = p switch
+        {
+            Protocol.Serial => "留空时使用串口名称",
+            Protocol.Shell => "留空时使用程序名",
+            _ => "留空时使用主机 / IP"
+        };
         UpdateAvailability();
     }
     void UpdateAvailability()
@@ -192,11 +199,12 @@ public sealed class SessionEditor : Form
     Session Draft()
     {
         string S(string key) => inputs[key].Text.Trim(); int N(string key) => (int)((NumericUpDown)inputs[key]).Value; bool B(string key) => ((CheckBox)inputs[key]).Checked;
-        return original with { Name = S("Name"), Group = S("Group"), Protocol = SelectedProtocol, Host = S("Host"), Port = N("Port"), Username = S("Username"), PrivateKey = S("PrivateKey"), RemotePath = S("RemotePath"), UseTls = B("UseTls"), SerialPort = S("SerialPort"), BaudRate = N("BaudRate"), DataBits = N("DataBits"), Parity = S("Parity"), StopBits = S("StopBits"), Handshake = S("Handshake"), Executable = S("Executable"), Arguments = inputs["Arguments"].Text, WorkingDirectory = S("WorkingDirectory"), RdpFullScreen = B("RdpFullScreen"), Clipboard = B("Clipboard"), SavePassword = savePassword.Checked && SelectedProtocol is Protocol.SSH or Protocol.SFTP or Protocol.FTP or Protocol.RDP };
+        return SessionDraftDefaults.ApplyName(original with { Name = S("Name"), Group = S("Group"), Protocol = SelectedProtocol, Host = S("Host"), Port = N("Port"), Username = S("Username"), PrivateKey = S("PrivateKey"), RemotePath = S("RemotePath"), UseTls = B("UseTls"), SerialPort = S("SerialPort"), BaudRate = N("BaudRate"), DataBits = N("DataBits"), Parity = S("Parity"), StopBits = S("StopBits"), Handshake = S("Handshake"), Executable = S("Executable"), Arguments = inputs["Arguments"].Text, WorkingDirectory = S("WorkingDirectory"), RdpFullScreen = B("RdpFullScreen"), Clipboard = B("Clipboard"), SavePassword = savePassword.Checked && SelectedProtocol is Protocol.SSH or Protocol.SFTP or Protocol.FTP or Protocol.RDP });
     }
     IReadOnlyList<SessionValidationError> ValidateDraft(bool focus)
     {
-        var draft = Draft(); var failures = draft.GetValidationErrors().ToList();
+        var draft = Draft();
+        var failures = draft.GetValidationErrors(requireAuthentication: true).Where(error => error.Field != "Name").ToList();
         try { GroupPath.Validate(draft.Group); } catch (ArgumentException error) { failures.Add(new("Group", error.Message)); }
         foreach (var (key, label) in errors)
         {

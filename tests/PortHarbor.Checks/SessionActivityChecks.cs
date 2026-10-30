@@ -109,7 +109,7 @@ internal static partial class Program
             Check(search.Text.Length == 0, "Escape clears session search without closing the main window");
             form.Connect(b, ""); form.Connect(a, ""); form.Connect(new Session { Protocol = Protocol.Telnet, Host = "temporary.invalid", Port = 23 }, "one-time-secret"); Application.DoEvents();
             Filters(form).Items["LibraryRecent"]!.PerformClick();
-            var recentNodes = FindControl<TreeView>(form).Nodes.Cast<TreeNode>().ToArray();
+            var recentNodes = FindControl<TreeView>(form).Nodes["UserSessionsRoot"]!.Nodes.Cast<TreeNode>().ToArray();
             Check(recentNodes.Select(n => ((Session)n.Tag!).Id).SequenceEqual([a.Id, b.Id]) && recentNodes[0].Text.Contains(a.Group)
                 && recentNodes[0].ToolTipText.Contains("不代表连接成功"), "recent view orders distinct saved attempts and shows category and attempt semantics");
             Check(!File.ReadAllText(Path.Combine(store.DirectoryPath, "session-activity.json")).Contains("one-time-secret"),
@@ -167,7 +167,7 @@ internal static partial class Program
     {
         using var store = new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root, "library-credentials"), true));
         store.SetMasterPassword("fixture-master-password");
-        var saved = new Session { Name = "密码会话", Host = "original.invalid", SavePassword = true, Group = "工作/安全" };
+        var saved = new Session { Name = "密码会话", Host = "original.invalid", Username = "operator", SavePassword = true, Group = "工作/安全" };
         store.PutSession(saved, "original-password");
         var opened = new List<(Session Session, string Password)>();
         using var form = new MainForm(store, new ConfigurationService(store, store, store),
@@ -194,7 +194,8 @@ internal static partial class Program
             timer.Tick += (_, _) =>
             {
                 timer.Stop(); var dialog = Application.OpenForms.Cast<Form>().Single(f => f.Modal);
-                try { action(dialog); } catch (Exception error) { failure = error; }
+                try { action(dialog); }
+                catch (Exception error) { failure = error; }
                 finally { if (!dialog.IsDisposed) dialog.Close(); }
             };
             timer.Start(); open(); if (failure != null) throw failure;

@@ -55,6 +55,7 @@ PortHarbor 是采用 MIT License 的 Windows 连接工作台。首次使用请�
 - [ADR 0019：SSH 交互式认证](adr/0019-ssh-interactive-authentication.md)
 - [ADR 0020：单文件与安装器](adr/0020-single-file-and-installer.md)
 - [ADR 0021：工程基线收尾](adr/0021-technical-baseline-completion.md)
+- [ADR 0022：会话树与新建默认值](adr/0022-session-creation-defaults.md)
 - [ADR 模板](adr/0000-template.md)
 
 ## 许可

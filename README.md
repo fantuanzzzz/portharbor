@@ -55,6 +55,8 @@ Get-FileHash .\PortHarbor-0.2.0-portable-win-x64.exe -Algorithm SHA256
 3. 选择「仅连接」「仅保存」或「保存并连接」。已保存会话可在左侧双击连接。
 4. 首次 SSH/SFTP 连接时，核对服务器指纹后再信任；需要保存密码时先设置主密码。
 
+会话名称可留空，默认使用主机/IP；SSH/SFTP 用户名必填。会话库统一在 `User sessions` 下管理，分类入口合并为「新建分类」：选中根节点新建顶层分类，选中已有分类则新建子分类。
+
 本地 Shell 可使用 Windows PowerShell，或指定已安装的 `cmd.exe` / `pwsh.exe`。RDP 在 Windows 自带客户端窗口中打开；PortHarbor 显示“已启动”不代表远端登录已成功，关闭标签不会关闭 mstsc。
 
 ### 常用快捷键

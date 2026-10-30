@@ -32,13 +32,13 @@ public sealed record Session
     public bool SavePassword { get; set; }
     [JsonIgnore] public ProtocolConfiguration ProtocolConfiguration => SessionProtocolConfiguration.Get(this);
 
-    public void Validate()
+    public void Validate(bool requireAuthentication = false)
     {
-        var errors = GetValidationErrors();
+        var errors = GetValidationErrors(requireAuthentication);
         if (errors.Count > 0) throw new ArgumentException(errors[0].Message);
     }
 
-    public IReadOnlyList<SessionValidationError> GetValidationErrors()
+    public IReadOnlyList<SessionValidationError> GetValidationErrors(bool requireAuthentication = false)
     {
         var errors = new List<SessionValidationError>();
         if (string.IsNullOrWhiteSpace(Name)) errors.Add(new(nameof(Name), "请输入会话名称。"));
@@ -48,6 +48,9 @@ public sealed record Session
             if (string.IsNullOrWhiteSpace(Host) || Host.Any(c => char.IsWhiteSpace(c) || char.IsControl(c))) errors.Add(new(nameof(Host), "请输入有效主机名或 IP（不包含协议前缀和空格）。"));
             if (Port is < 1 or > 65535) errors.Add(new(nameof(Port), "端口必须在 1–65535 之间。"));
         }
+        // Legacy configuration can omit credentials; interactive creation and connection require an SSH identity.
+        if (requireAuthentication && Protocol is (Protocol.SSH or Protocol.SFTP) && string.IsNullOrWhiteSpace(Username))
+            errors.Add(new(nameof(Username), "请输入 SSH / SFTP 用户名（必填）。"));
         if (Protocol == Protocol.Serial)
         {
             if (string.IsNullOrWhiteSpace(SerialPort)) errors.Add(new(nameof(SerialPort), "请输入串口名称，可手动输入 COM 端口。"));

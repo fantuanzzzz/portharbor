@@ -8,6 +8,7 @@ try
 {
     Directory.CreateDirectory(transferRoot);
     PortHarbor.Checks.ApplicationServiceChecks.Run(Check);
+    PortHarbor.Checks.SessionDraftChecks.Run(Check);
     await PortHarbor.Checks.FileTransferPolicyChecks.RunAsync(transferRoot, Check);
     await PortHarbor.Checks.TerminalSessionChecks.RunAsync(Check);
     PortHarbor.Checks.RemoteDesktopChecks.Run(Check);

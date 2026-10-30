@@ -42,7 +42,7 @@ internal static partial class Program
             Check(UiTheme.Choice(form) == choice && new WorkspaceLayoutRepository(store.Paths).Load().Theme == choice
                 && ((ToolStripMenuItem)menu.DropDownItems["Theme" + choice]!).Checked, $"{choice} menu applies and saves the selected interface theme");
             Snapshot(form, "theme-" + choice + "-main");
-            form.Connect(new Session { Host = "fixture.invalid", Name = "主题检查" }, ""); Application.DoEvents();
+            form.Connect(new Session { Host = "fixture.invalid", Username = "operator", Name = "主题检查" }, ""); Application.DoEvents();
             var tabs = FindControl<TabControl>(form); var terminal = FindControl<TerminalView>(tabs.SelectedTab!);
             terminal.ApplyPreferences(new TerminalPreferences { FontSize = 14, ForegroundRgb = 0xFEEDCB, BackgroundRgb = 0x123456 });
             terminal.Append("终端配色 / English\r\n"); Application.DoEvents();

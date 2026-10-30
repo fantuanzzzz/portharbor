@@ -17,7 +17,7 @@ internal static partial class Program
             using var bitmap = new Bitmap(editor.Width, editor.Height);
             editor.DrawToBitmap(bitmap, new Rectangle(Point.Empty, editor.Size)); bitmap.Save(Path.Combine(output, name + ".png"));
         }
-        var source = new Session { Name = "核心服务器", Host = "original.invalid", Port = 2222, Group = "工作/服务器", PrivateKey = "key-original", Arguments = "/original" };
+        var source = new Session { Name = "核心服务器", Host = "original.invalid", Username = "operator", Port = 2222, Group = "工作/服务器", PrivateKey = "key-original", Arguments = "/original" };
         using (var editor = new SessionEditor(source, "one-time-secret", serialPorts: new CapabilitySerialProvider()))
         {
             editor.Show(); Application.DoEvents();
@@ -57,10 +57,10 @@ internal static partial class Program
             EditorControl<TextBox>(editor, "Name").Text = ""; EditorControl<TextBox>(editor, "Host").Text = "bad host";
             EditorControl<ComboBox>(editor, "Group").Text = "工作//无效";
             EditorControl<Button>(editor, "SaveAndConnect").PerformClick(); Application.DoEvents();
-            Check(editor.Visible && editor.DialogResult != DialogResult.OK && EditorControl<TextBox>(editor, "Name").Focused
-                && EditorControl<Label>(editor, "ErrorName").Visible && EditorControl<Label>(editor, "ErrorHost").Visible
+            Check(editor.Visible && editor.DialogResult != DialogResult.OK && EditorControl<TextBox>(editor, "Host").Focused
+                && !EditorControl<Label>(editor, "ErrorName").Visible && EditorControl<Label>(editor, "ErrorHost").Visible
                 && EditorControl<Label>(editor, "ErrorGroup").Visible && editor.Result.Name == source.Name,
-                "invalid submission remains open highlights all invalid fields and focuses the first without publishing a result");
+                "an automatic name remains optional while invalid host and group fields are highlighted without publishing a result");
             Snapshot(editor, "editor-validation-light");
             EditorControl<TextBox>(editor, "Name").Text = "已修正";
             Check(!EditorControl<Label>(editor, "ErrorName").Visible && EditorControl<Label>(editor, "ErrorHost").Visible,
@@ -213,7 +213,8 @@ internal static partial class Program
             timer.Tick += (_, _) =>
             {
                 timer.Stop(); var dialog = Application.OpenForms.Cast<Form>().Single(f => f.Modal);
-                try { action(dialog); } catch (Exception error) { failure = error; }
+                try { action(dialog); }
+                catch (Exception error) { failure = error; }
                 finally { if (!dialog.IsDisposed) dialog.Close(); }
             };
             timer.Start(); open(); if (failure != null) throw failure; Application.DoEvents();
@@ -244,7 +245,7 @@ internal static partial class Program
         Check(opened.Count == starts + 1 && opened.Last().Session.Host == "saved-new.invalid" && store.GetSessions().Single().Host == "saved-new.invalid",
             "save-and-connect persists the edited values and starts exactly one connection with those values");
         store.SetMasterPassword("fixture-master-password");
-        saved = saved with { Protocol = Protocol.SSH, Host = "secret.invalid", SavePassword = true };
+        saved = saved with { Protocol = Protocol.SSH, Host = "secret.invalid", Username = "operator", SavePassword = true };
         store.PutSession(saved, "existing-secret");
         form.SetLibraryView(SessionLibraryView.All); Select(); store.LockVault();
         byte[] locked = File.ReadAllBytes(store.FilePath); starts = opened.Count;

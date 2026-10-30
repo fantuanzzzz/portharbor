@@ -16,8 +16,19 @@ internal static partial class Program
             var service = new WorkspaceLayoutService(new WorkspaceLayoutRepository(store.Paths)); service.Load();
             Check(service.Current == new WorkspaceLayout() && !service.LoadFailed && !File.Exists(path),
                 $"{portable} missing workspace data uses defaults without creating a file");
-            var expected = new WorkspaceLayout { X = -1500, Y = 100, Width = 1100, Height = 720, HasPosition = true,
-                Maximized = true, SidebarWidth = 320, SidebarVisible = false, Dpi = 120, Theme = InterfaceTheme.Dark };
+            var expected = new WorkspaceLayout
+            {
+                X = -1500,
+                Y = 100,
+                Width = 1100,
+                Height = 720,
+                HasPosition = true,
+                Maximized = true,
+                SidebarWidth = 320,
+                SidebarVisible = false,
+                Dpi = 120,
+                Theme = InterfaceTheme.Dark
+            };
             service.Save(expected);
             var restarted = new WorkspaceLayoutService(new WorkspaceLayoutRepository(store.Paths)); restarted.Load();
             Check(restarted.Current == expected && before.SequenceEqual(File.ReadAllBytes(store.FilePath)),
@@ -65,7 +76,7 @@ internal static partial class Program
             { form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, form.Size)); bitmap.Save(Path.Combine(Path.GetDirectoryName(screenshot)!, "workspace-default.png")); }
             Check(!actions.Items["ConnectSelected"]!.Enabled && !actions.Items["EditSelected"]!.Enabled,
                 "workspace connect and edit actions are unavailable without a selected session");
-            tree.SelectedNode = tree.Nodes.Cast<TreeNode>().SelectMany(n => n.Nodes.Cast<TreeNode>()).Single(n => n.Tag is Session);
+            tree.SelectedNode = tree.Nodes["UserSessionsRoot"]!.Nodes.Cast<TreeNode>().SelectMany(n => n.Nodes.Cast<TreeNode>()).Single(n => n.Tag is Session);
             Check(actions.Items["ConnectSelected"]!.Enabled && actions.Items["EditSelected"]!.Enabled,
                 "workspace actions enable when a saved session is selected");
             actions.Items["ConnectSelected"]!.PerformClick(); Application.DoEvents();

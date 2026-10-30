@@ -15,6 +15,7 @@ public static class SshClientSupport
     internal static ConnectionInfo SshInfo(string host, int port, string username, string privateKey, string password, out PrivateKeyFile? key, SshAuthenticationPromptHandler? prompt)
     {
         key = null;
+        if (string.IsNullOrWhiteSpace(username)) throw new ArgumentException("请输入 SSH / SFTP 用户名（必填）。", nameof(username));
         var methods = new List<AuthenticationMethod>();
         if (!string.IsNullOrWhiteSpace(privateKey))
         {

@@ -122,7 +122,7 @@ internal static partial class Program
         Descendants(rdpPage).OfType<Button>().Single(b => b.Text == "打开远程桌面").PerformClick();
         Check(desktop.Calls == 1 && Descendants(rdpPage).Any(c => c.Name == "PlatformUnavailable"),
             "RDP retry rechecks capability before launching another external client");
-        form.Connect(new Session { Protocol = Protocol.SSH, Host = "fixture.invalid" }, "");
+        form.Connect(new Session { Protocol = Protocol.SSH, Host = "fixture.invalid", Username = "operator" }, "");
         var sshPage = tabs.SelectedTab!;
         PumpUntil(() => transport.ReadStarted.Task.IsCompleted);
         Check(terminalStarts == 1, "SSH connection entry remains usable when all local capabilities are unavailable");

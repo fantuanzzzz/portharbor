@@ -58,6 +58,7 @@ internal static partial class Program
             if (args.Length > 0 && args[0] == "--ui-theme") { InitializeUi(); ThemeUi(root, args[1]); return 0; }
             if (args.Length > 0 && args[0] == "--ui-library") { InitializeUi(); SessionLibraryUi(root, args[1]); return 0; }
             if (args.Length > 0 && args[0] == "--ui-editor") { InitializeUi(); SessionEditorUi(root, args[1]); return 0; }
+            if (args.Length > 0 && args[0] == "--ui-session-creation") { InitializeUi(); SessionCreationUi(root, args[1]); return 0; }
             if (args.Length > 0 && args[0] == "--ui-files") { InitializeUi(); FileTransferWorkflowUi(args[1]); return 0; }
             if (args.Length > 0 && args[0] == "--ui-queue") { InitializeUi(); TransferQueueUi(root, args[1]); return 0; }
             if (args.Length > 0 && args[0] == "--ui-shell") { UiShell.Run(root, args[1]); return 0; }
@@ -79,6 +80,7 @@ internal static partial class Program
                 SessionLibraryChecks.Run(Check);
                 SessionActivityChecks.Run(Check); SessionActivityStorage(root);
                 SessionValidationChecks.Run(Check);
+                SessionDraftChecks.Run(Check);
                 await TransferQueueChecks.RunAsync(Check);
                 SshAuthenticationChecks.Run(Check);
                 SessionRepositoryCompatibility(root);
@@ -158,7 +160,8 @@ internal static partial class Program
         foreach (var p in Enum.GetValues<Protocol>()) { using var editor = new SessionEditor(new Session { Protocol = p, Port = Session.DefaultPort(p) }); editor.Show(); Application.DoEvents(); editor.Close(); }
         Check(true, "all seven protocol editors open without error");
         var tree = FindControl<TreeView>(form);
-        Check(tree.Nodes.Cast<TreeNode>().Any(n => n.Text == "空分类" && n.Nodes.Count == 0), "sidebar renders saved empty category");
+        Check(tree.Nodes["UserSessionsRoot"]!.Nodes.Cast<TreeNode>().Any(n => n.Text == "空分类" && n.Nodes.Count == 0), "sidebar renders saved empty category beneath User sessions");
+        SessionCreationUi(root, Path.GetDirectoryName(Path.GetFullPath(output))!);
         var tabs = FindControl<TabControl>(form);
         var first = new TabPage("first"); var second = new TabPage("second");
         tabs.TabPages.Add(first); tabs.TabPages.Add(second); tabs.SelectedTab = second;

@@ -19,6 +19,7 @@ dotnet test tests/PortHarbor.UnitTests/PortHarbor.UnitTests.csproj -c Release --
 | --- | --- | --- |
 | Application.Checks 顶层服务检查 | ApplicationServices | 保存、删除、凭据/信任端口与失败传播 |
 | Shared/SessionValidationChecks | SessionValidation | 七协议字段校验与 inactive 字段 |
+| Shared/SessionDraftChecks | SessionDraftDefaults | 默认命名、SSH/SFTP 用户名必填与旧配置读取兼容 |
 | Shared/SessionLibraryChecks | SessionLibrary | 筛选、排序、搜索、快照 |
 | Shared/SessionActivityChecks | SessionActivity | 收藏、最近与删除关联 |
 | Shared/ConfigurationTransferChecks | ConfigurationTransfer | 导入导出、合并、敏感字段排除 |
@@ -33,7 +34,7 @@ dotnet test tests/PortHarbor.UnitTests/PortHarbor.UnitTests.csproj -c Release --
 | Shared/FileTransferPolicyChecks | FileTransferPolicy | 超时、暂存、提交、恢复及取消 |
 | Checks/DiagnosticBundleChecks → Shared/DiagnosticExportChecks | DiagnosticBundle | 预览/导出一致、限量、构建身份与敏感字段排除 |
 
-迁移采用同一份 Shared 实现，由标准测试调用真实断言；没有包装整个旧控制台进程作为一项测试。原应用检查和核心检查仍调用相同逻辑，便于比较历史结果。**15 个测试组不等于 15 条断言，也不能与旧检查计数相加充当新增覆盖。**逐条拆分为更细的命名测试可继续改善定位，不阻碍本批标准框架落地。
+迁移采用同一份 Shared 实现，由标准测试调用真实断言；没有包装整个旧控制台进程作为一项测试。原应用检查和核心检查仍调用相同逻辑，便于比较历史结果。**当前 16 个测试组不等于 16 条断言，也不能与旧检查计数相加充当新增覆盖。**逐条拆分为更细的命名测试可继续改善定位，不阻碍标准框架使用。
 
 ## 保留的独立入口
 
@@ -44,6 +45,7 @@ dotnet test tests/PortHarbor.UnitTests/PortHarbor.UnitTests.csproj -c Release --
 | Checks `--windows` | ConPTY、系统能力、真实 DPAPI、RDP 替身进程生命周期；JSON |
 | Checks `--integration servers.json` | Python 回环 SSH/Telnet/FTP/SFTP 与中断/恢复；JSON |
 | Checks `--ui` / `--ui-*` | 交互 Windows 桌面与 WinForms 控件；截图及 JSON |
+| Checks `--ui-session-creation <输出目录>` | 固定根节点、统一分类、可选名称、SSH/SFTP 必填及三种提交的桌面专项；截图及 JSON |
 | Checks `--ui-shell` | 真实 ConPTY 嵌入 UI；终端输出证据 |
 | `build.ps1 -ExtendedBaseline` | 标准测试 + 旧分层检查 + 协议/UI/ConPTY + 历史目录包冒烟 |
 | `build.ps1 -P10` | 单文件便携及隔离 AppId 安装/模拟升级/卸载；发行 JSON、manifest |

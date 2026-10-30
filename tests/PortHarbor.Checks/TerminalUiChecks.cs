@@ -15,7 +15,7 @@ internal static partial class Program
             try
             {
                 form.Show(); Application.DoEvents();
-                form.Connect(new Session { Name = "test terminal", Host = "fixture.invalid" }, "");
+                form.Connect(new Session { Name = "test terminal", Host = "fixture.invalid", Username = "operator" }, "");
                 var tabs = FindControl<TabControl>(form); var page = tabs.SelectedTab!;
                 PumpUntil(() => backend.ReadStarted.Task.IsCompleted);
                 Task? close = null;
@@ -56,7 +56,7 @@ internal static partial class Program
     {
         using var store = new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root, "terminal-reconnect-ui"), true));
         var instances = new List<ScriptedTerminalTransport>();
-        var session = new Session { Name = "reconnect fixture", Host = "fixture.invalid" };
+        var session = new Session { Name = "reconnect fixture", Host = "fixture.invalid", Username = "operator" };
         using var form = new MainForm(store, new ConfigurationService(store, store, store),
             (saved, _, _) =>
             {

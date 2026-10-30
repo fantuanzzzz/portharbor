@@ -10,6 +10,7 @@ public sealed class CoreTests
 
     [Test] public void ApplicationServices() => ApplicationServiceChecks.Run(Check);
     [Test] public void SessionValidation() => SessionValidationChecks.Run(Check);
+    [Test] public void SessionDraftDefaults() => SessionDraftChecks.Run(Check);
     [Test] public void SessionLibrary() => SessionLibraryChecks.Run(Check);
     [Test] public void SessionActivity() => SessionActivityChecks.Run(Check);
     [Test] public void ConfigurationTransfer() => ConfigurationTransferChecks.Run(Check);

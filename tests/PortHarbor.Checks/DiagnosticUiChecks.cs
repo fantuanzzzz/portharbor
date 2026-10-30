@@ -68,7 +68,7 @@ internal static partial class Program
 
         using var fallback = new MainForm(store, new ConfigurationService(store, store, store), (_, _, _) => new UnreportedTerminalFailure());
         fallback.Show(); Application.DoEvents();
-        fallback.Connect(new Session { Host = "fixture.invalid", Name = "unreported failure" }, "");
+        fallback.Connect(new Session { Host = "fixture.invalid", Username = "operator", Name = "unreported failure" }, "");
         var fallbackPage = FindControl<TabControl>(fallback).SelectedTab!;
         var fallbackStatus = FindControl<ConnectionStatusLabel>(fallbackPage);
         PumpUntil(() => fallbackStatus.Text.Contains("未知错误"));
