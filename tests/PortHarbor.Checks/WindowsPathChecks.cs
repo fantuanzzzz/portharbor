@@ -65,6 +65,20 @@ internal static partial class Program
         var forcedPortable = WindowsAppDataPaths.Resolve(["--portable"], app, local);
         Check(forcedPortable.IsPortable && forcedPortable.LegacyConfigurationFile == null,
             "explicit portable mode disables installed legacy migration");
+        string cleanApp = Path.Combine(root, "single-file-default"); Directory.CreateDirectory(cleanApp);
+        var singleFilePortable = WindowsAppDataPaths.Resolve([], cleanApp, local, defaultPortable: true);
+        Check(singleFilePortable.IsPortable && singleFilePortable.ConfigurationFile == Path.Combine(cleanApp, "PortHarbor.ini")
+            && singleFilePortable.LegacyConfigurationFile == null,
+            "single-file portable default works without a sidecar marker, INI or startup argument");
+        File.WriteAllText(Path.Combine(cleanApp, "PortHarbor.installed"), "");
+        File.WriteAllText(Path.Combine(cleanApp, "PortHarbor.portable"), "");
+        File.WriteAllText(Path.Combine(cleanApp, "PortHarbor.ini"), "portable data must remain untouched");
+        var installedMarker = WindowsAppDataPaths.Resolve([], cleanApp, local, defaultPortable: true);
+        Check(!installedMarker.IsPortable && installedMarker.ConfigurationFile == defaults.ConfigurationFile,
+            "installed marker overrides a single-file default and stale portable files");
+        Check(WindowsAppDataPaths.Resolve(["--portable"], cleanApp, local, defaultPortable: true).IsPortable
+            && !WindowsAppDataPaths.Resolve(["--installed"], app, local, defaultPortable: true).IsPortable,
+            "explicit mode arguments override both embedded defaults and distribution markers");
 
         var explicitDir = WindowsAppDataPaths.Resolve(["--data-dir", Path.Combine("relative", "chosen")], app, local);
         Check(explicitDir.IsPortable && explicitDir.ConfigurationDirectory == Path.GetFullPath(Path.Combine("relative", "chosen"))

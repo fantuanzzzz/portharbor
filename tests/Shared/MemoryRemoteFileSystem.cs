@@ -7,6 +7,8 @@ internal sealed class MemoryRemoteFileSystem : IRemoteFileSystem
 {
     public readonly Dictionary<string, byte[]> Files = [];
     public readonly HashSet<string> Directories = [];
+    public Func<string, IReadOnlyList<RemoteEntry>>? Listing { get; set; }
+    public Exception? ListError { get; set; }
     public Exception? ConnectError, ExistsError, CommitError, CompleteReadError;
     public long? ReportedLength;
     public bool CleanupError, WriteOpen, ReadOpen, UnknownLength, BlockList, ListCancellationObserved, BlockConnect, BlockReadCompletion, ReadCompletionCancelled;
@@ -28,6 +30,7 @@ internal sealed class MemoryRemoteFileSystem : IRemoteFileSystem
     public async Task<IReadOnlyList<RemoteEntry>> ListAsync(string path, CancellationToken token)
     {
         ListCalls++;
+        if (ListError != null) throw ListError;
         if (BlockList)
         {
             ListStarted.TrySetResult();
@@ -35,6 +38,7 @@ internal sealed class MemoryRemoteFileSystem : IRemoteFileSystem
             catch (OperationCanceledException) { ListCancellationObserved = true; throw; }
         }
         token.ThrowIfCancellationRequested();
+        if (Listing != null) return Listing(path);
         return Files.Select(f => new RemoteEntry(f.Key.TrimStart('/'), f.Key, false, f.Value.Length, DateTime.UnixEpoch)).ToList();
     }
     public Task<bool> ExistsAsync(string path, CancellationToken token)

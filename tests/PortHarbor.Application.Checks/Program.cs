@@ -77,6 +77,10 @@ try
     PortHarbor.Checks.ConfigurationTransferChecks.Run(Check);
     PortHarbor.Checks.DiagnosticMessageChecks.Run(Check);
     PortHarbor.Checks.SessionLibraryChecks.Run(Check);
+    PortHarbor.Checks.SessionActivityChecks.Run(Check);
+    PortHarbor.Checks.SessionValidationChecks.Run(Check);
+    await PortHarbor.Checks.TransferQueueChecks.RunAsync(Check);
+    PortHarbor.Checks.WorkspacePlacementChecks.Run(Check);
     Console.WriteLine($"{results.Count} checks passed");
     return 0;
 }

@@ -33,6 +33,15 @@ internal static partial class Program
         SendTabMessage(tabs.Handle, 0x207, new IntPtr(16), position);
         SendTabMessage(tabs.Handle, 0x208, IntPtr.Zero, position);
         Check(requests.Count == 1 && requests[0] == second, "native middle click requests closure of clicked tab");
+        var closeOthers = new List<TabPage>(); var renamed = new List<TabPage>(); var copied = new List<TabPage>();
+        tabs.CloseOthersRequested += closeOthers.Add; tabs.RenameRequested += renamed.Add; tabs.CopyTitleRequested += copied.Add;
+        tabs.SelectedTab = first;
+        tabs.ContextMenuStrip!.Items[0].PerformClick(); tabs.ContextMenuStrip.Items[1].PerformClick(); tabs.ContextMenuStrip.Items[3].PerformClick();
+        Check(renamed.SequenceEqual([first]) && copied.SequenceEqual([first]) && closeOthers.SequenceEqual([first]),
+            "tab context actions target the selected tab for rename title copy and close-others requests");
+        tabs.SelectedTab = second; second.Text = "A very long session title that must remain identifiable"; tabs.Invalidate(); Application.DoEvents();
+        using (var bitmap = new Bitmap(tabs.Width, tabs.Height)) tabs.DrawToBitmap(bitmap, tabs.ClientRectangle);
+        Check(second.ToolTipText == second.Text, "long tab titles expose their full text in a tooltip");
         form.Close();
     }
 }

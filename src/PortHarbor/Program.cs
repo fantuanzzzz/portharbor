@@ -12,11 +12,14 @@ internal static class Program
         Application.ThreadException += (_, e) => MessageBox.Show(e.Exception.Message, "PortHarbor", MessageBoxButtons.OK, MessageBoxIcon.Error);
         try
         {
-            var paths = WindowsAppDataPaths.Resolve(args);
+            bool portableDefault = System.Reflection.CustomAttributeExtensions
+                .GetCustomAttributes<System.Reflection.AssemblyMetadataAttribute>(typeof(Program).Assembly)
+                .Any(a => a.Key == "PortHarbor.PortableDefault" && a.Value == "true");
+            var paths = WindowsAppDataPaths.Resolve(args, defaultPortable: portableDefault);
             using var store = new Store(new WindowsSecretProtector(), paths);
             if (smoke)
             {
-                using var form = new MainForm(store);
+                using var form = new MainForm(store, rememberLayout: false);
                 form.Shown += (_, _) => form.Close();
                 Application.Run(form);
             }

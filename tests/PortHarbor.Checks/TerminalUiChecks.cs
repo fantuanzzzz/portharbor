@@ -39,4 +39,41 @@ internal static partial class Program
             finally { backend.DisposeRelease.TrySetResult(); }
         }
     }
+
+    static void TerminalSearchUi()
+    {
+        using var terminal = new TerminalView(); terminal.CreateControl();
+        terminal.Screen.Feed("first line\r\nMATCH target\r\nlast line");
+        string snapshot = terminal.Screen.Text;
+        int found = terminal.FindText("match", 0);
+        Check(found >= 0 && terminal.Screen.Text == snapshot, "terminal find searches the existing screen/history case-insensitively without sending input or changing buffer contents");
+        int absent = terminal.FindText("not present", 0);
+        Check(absent == -1 && terminal.Screen.Text == snapshot, "terminal find reports no match and leaves the existing buffer unchanged");
+        Check(terminal.FindText("", 0) == -1 && terminal.Screen.Text == snapshot, "empty terminal search is a no-op on the current buffer");
+    }
+
+    static void TerminalReconnectUi(string root)
+    {
+        using var store = new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root, "terminal-reconnect-ui"), true));
+        var instances = new List<ScriptedTerminalTransport>();
+        var session = new Session { Name = "reconnect fixture", Host = "fixture.invalid" };
+        using var form = new MainForm(store, new ConfigurationService(store, store, store),
+            (saved, _, _) =>
+            {
+                var transport = new ScriptedTerminalTransport(); instances.Add(transport);
+                return new TerminalConnection(saved, transport);
+            });
+        form.Show(); Application.DoEvents(); form.Connect(session, "");
+        PumpUntil(() => instances.Count == 1 && instances[0].ReadStarted.Task.IsCompleted);
+        var page = FindControl<TabControl>(form).SelectedTab!;
+        var terminal = FindControl<TerminalView>(page); terminal.Screen.Feed("old-buffer-marker");
+        var retry = Descendants(page).OfType<Button>().Single(b => b.Name == "ReconnectTerminal");
+        retry.PerformClick(); PumpUntil(() => instances.Count == 2);
+        PumpUntil(() => instances[0].DisposeStarted.Task.IsCompleted);
+        Check(instances.Count == 2 && instances[0].DisposeCalls == 1 && ReferenceEquals(FindControl<TabControl>(form).SelectedTab, page)
+            && instances[1].Written.IsEmpty,
+            "reconnect awaits disposal then creates a fresh session in the same tab without replaying input");
+        foreach (TabPage tab in FindControl<TabControl>(form).TabPages) tab.Tag = null;
+        form.Close(); PumpUntil(() => form.IsDisposed);
+    }
 }

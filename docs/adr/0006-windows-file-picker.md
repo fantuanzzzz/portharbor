@@ -23,3 +23,7 @@
 ## 复审条件
 
 引入其他 UI、另一个操作系统、多文件上传、目录选择、异步选择或额外文件类型时复审。不得将窗口句柄带入 Application；文件选择取消不能被当成失败或空路径继续执行。
+
+2026-10-28 复审：P05 编辑器复用文件选择端口，新增独立 `IFolderPicker` 支持 Shell 工作目录；沿用本项目适配器、模态 owner、取消及释放边界，没有将窗口类型带入 Application。见 [ADR 0015](0015-session-editor.md)。
+
+2026-10-29 复审：P08 增加独立 `IMultiFilePicker`，取消返回空集合；WindowsFilePicker 每次创建及释放多选 OpenFileDialog，保留模态 owner 与路径不触发传输的边界。批量下载复用 IFolderPicker，没有向 Application 引入窗口类型。见 [ADR 0018](0018-transfer-queue.md)。

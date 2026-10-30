@@ -1,5 +1,9 @@
-param([string]$Dotnet = 'dotnet', [string]$PackageSource = '', [switch]$IncludeRuntime, [switch]$ExtendedBaseline, [string]$OutputDirectory = '', [switch]$SimulateFailureAfterInstall)
+param([string]$Dotnet = 'dotnet', [string]$PackageSource = '', [switch]$IncludeRuntime, [switch]$ExtendedBaseline, [string]$OutputDirectory = '', [switch]$SimulateFailureAfterInstall, [switch]$P10)
 $ErrorActionPreference = 'Stop'
+if ($P10) {
+    & (Join-Path $PSScriptRoot 'packaging\Build-P10.ps1') -Dotnet $Dotnet -OutputDirectory $OutputDirectory
+    return
+}
 $userAppData = $env:APPDATA
 $env:DOTNET_CLI_HOME = Join-Path $PSScriptRoot '.build-home'
 $env:NUGET_PACKAGES = Join-Path $PSScriptRoot '.packages'

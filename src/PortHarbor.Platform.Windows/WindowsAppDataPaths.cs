@@ -26,14 +26,15 @@ public sealed class WindowsAppDataPaths : IAppDataPaths
         ConfigurationFile = Path.Combine(ConfigurationDirectory, portable ? "PortHarbor.ini" : "settings.json");
     }
 
-    public static WindowsAppDataPaths Resolve(string[] args, string? baseDirectory = null)
-        => Resolve(args, baseDirectory ?? AppContext.BaseDirectory, Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+    public static WindowsAppDataPaths Resolve(string[] args, string? baseDirectory = null, bool defaultPortable = false)
+        => Resolve(args, baseDirectory ?? AppContext.BaseDirectory, Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), defaultPortable);
 
-    internal static WindowsAppDataPaths Resolve(string[] args, string baseDirectory, string localAppData)
+    internal static WindowsAppDataPaths Resolve(string[] args, string baseDirectory, string localAppData, bool defaultPortable = false)
     {
         ArgumentNullException.ThrowIfNull(args);
         baseDirectory = Path.GetFullPath(baseDirectory);
-        bool portable = File.Exists(Path.Combine(baseDirectory, "PortHarbor.portable")) || File.Exists(Path.Combine(baseDirectory, "PortHarbor.ini"));
+        bool portable = !File.Exists(Path.Combine(baseDirectory, "PortHarbor.installed"))
+            && (defaultPortable || File.Exists(Path.Combine(baseDirectory, "PortHarbor.portable")) || File.Exists(Path.Combine(baseDirectory, "PortHarbor.ini")));
         string? directory = null;
         for (int i = 0; i < args.Length; i++)
         {

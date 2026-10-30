@@ -19,6 +19,12 @@ internal static partial class Program
         throw new Exception("Expected " + typeof(T).Name + " to be thrown.");
     }
 
+    static async Task<Exception?> CaptureFailure(Task action)
+    {
+        try { await action; return null; }
+        catch (Exception error) { return error; }
+    }
+
     static int passed;
     static readonly List<string> results = [];
     static IAppDataPaths TestPaths(string? directory = null, bool portable = false)
@@ -32,6 +38,13 @@ internal static partial class Program
         try
         {
             if (args.Length > 0 && args[0] == "--ui") { await Ui(root, args[1]); return 0; }
+            if (args.Length > 0 && args[0] == "--ui-preferences") { InitializeUi(); TerminalPreferencesUi(root, args[1]); return 0; }
+            if (args.Length > 0 && args[0] == "--ui-workspace") { InitializeUi(); WorkspaceUi(root, args[1]); return 0; }
+            if (args.Length > 0 && args[0] == "--ui-theme") { InitializeUi(); ThemeUi(root, args[1]); return 0; }
+            if (args.Length > 0 && args[0] == "--ui-library") { InitializeUi(); SessionLibraryUi(root, args[1]); return 0; }
+            if (args.Length > 0 && args[0] == "--ui-editor") { InitializeUi(); SessionEditorUi(root, args[1]); return 0; }
+            if (args.Length > 0 && args[0] == "--ui-files") { InitializeUi(); FileTransferWorkflowUi(args[1]); return 0; }
+            if (args.Length > 0 && args[0] == "--ui-queue") { InitializeUi(); TransferQueueUi(root, args[1]); return 0; }
             if (args.Length > 0 && args[0] == "--ui-shell") { UiShell.Run(root, args[1]); return 0; }
             string? configPath = Option(args, "--integration");
             if (args.Contains("--terminal"))
@@ -46,7 +59,13 @@ internal static partial class Program
                 await DiagnosticLogChecks(root);
                 DiagnosticBundleChecks(root);
                 TypedConfigurationChecks();
+                TerminalPreferencesStorage(root);
+                WorkspaceStorage(root); WorkspacePlacementChecks.Run(Check);
                 SessionLibraryChecks.Run(Check);
+                SessionActivityChecks.Run(Check); SessionActivityStorage(root);
+                SessionValidationChecks.Run(Check);
+                await TransferQueueChecks.RunAsync(Check);
+                SshAuthenticationChecks.Run(Check);
                 SessionRepositoryCompatibility(root);
                 StorageAdapters(root);
                 ConfigurationTransferChecks.Run(Check);
@@ -67,7 +86,7 @@ internal static partial class Program
             }
             else if (configPath != null)
             {
-                await TelnetRoundTrip(root); await Integration(root, configPath); await SshRoundTrip(root, configPath);
+                await TelnetRoundTrip(root); await Integration(root, configPath); await SshRoundTrip(root, configPath); await SshInteractiveRoundTrip(root, configPath);
                 await SshFailureDiagnostics(root, configPath);
                 await TerminalNetworkCancellation(root);
                 await TerminalNetworkFailures(root, configPath);
@@ -132,12 +151,21 @@ internal static partial class Program
         form.Close();
         TabMouseUi();
         FileTransferUi();
+        FileTransferWorkflowUi(Path.GetDirectoryName(Path.GetFullPath(output))!);
+        TransferQueueUi(root, Path.GetDirectoryName(Path.GetFullPath(output))!);
         FileTransferFormCloseUi();
         DiagnosticUi(root);
         TerminalCloseUi(root);
+        TerminalSearchUi();
+        TerminalReconnectUi(root);
         SerialProviderUi();
         CapabilityUi(root);
         FilePickerUi(root);
+        TerminalPreferencesUi(root, Path.Combine(Path.GetDirectoryName(Path.GetFullPath(output))!, "terminal-preferences.png"));
+        WorkspaceUi(root, Path.Combine(Path.GetDirectoryName(Path.GetFullPath(output))!, "workspace.png"));
+        ThemeUi(root, Path.GetDirectoryName(Path.GetFullPath(output))!);
+        SessionLibraryUi(root, Path.GetDirectoryName(Path.GetFullPath(output))!);
+        SessionEditorUi(root, Path.GetDirectoryName(Path.GetFullPath(output))!);
     }
     static T FindControl<T>(Control parent) where T : Control
     {
@@ -157,6 +185,44 @@ internal static partial class Program
         connection.Output+=value=> { lock(text) { text.Append(value); if(text.ToString().Contains("SSH_TEST_READY")) ready.TrySetResult(true); if(text.ToString().Contains("ECHO:ordered-input")) echoed.TrySetResult(true); } };
         Task run=connection.Run(80,24); await ready.Task.WaitAsync(TimeSpan.FromSeconds(10)); connection.Send(Encoding.UTF8.GetBytes("ordered-input")); await echoed.Task.WaitAsync(TimeSpan.FromSeconds(10)); connection.Resize(100,30); connection.Dispose(); await run.WaitAsync(TimeSpan.FromSeconds(10));
         Check(true,"SSH live authentication, host key, PTY, ordered input and disconnect");
+    }
+    static async Task SshInteractiveRoundTrip(string root,string configPath)
+    {
+        using var config=System.Text.Json.JsonDocument.Parse(File.ReadAllText(configPath));
+        int port=config.RootElement.GetProperty("sftpPort").GetInt32();
+        var store=new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root,"ssh-interactive"), false));
+        var session=new Session { Protocol=Protocol.SSH,Host="127.0.0.1",Port=port,Username="keyboardtest" };
+        var received=new List<SshAuthenticationChallenge>();
+        IReadOnlyList<string> Answer(SshAuthenticationChallenge challenge)
+        {
+            received.Add(challenge);
+            return challenge.Prompts[0].Request.Contains("验证码", StringComparison.Ordinal) ? ["otp-123"] : ["device-yes"];
+        }
+        using var connection=TerminalConnectionFactory.Create(session, store, "", _=>true, Answer);
+        var output=new StringBuilder(); var ready=new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        connection.Output += value => { lock(output) { output.Append(value); if(output.ToString().Contains("SSH_TEST_READY")) ready.TrySetResult(true); } };
+        var run=connection.Run(80,24); await ready.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        connection.Dispose(); await run.WaitAsync(TimeSpan.FromSeconds(10));
+        Check(received.Count == 2 && received[0].Instruction == "第一轮验证" && received[1].Instruction == "第二轮验证"
+            && connection.State == ConnectionState.Closed, "SSH keyboard-interactive completes two challenge rounds and closes cleanly");
+
+        var sftpSession=session with { Protocol=Protocol.SFTP };
+        await using var sftp=RemoteFileSystemFactory.Create(sftpSession, store, "", _=>true, Answer);
+        await sftp.ConnectAsync(_=>{}, CancellationToken.None);
+        var listing=await sftp.ListAsync("/", CancellationToken.None);
+        Check(received.Count == 4 && listing.Count >= 0, "SFTP reuses the same multi-round authentication handler");
+        await sftp.DisposeAsync();
+
+        var cancelledPrompts=0;
+        using var cancelled=TerminalConnectionFactory.Create(session with { Username="canceltest" }, store, "", _=>true, challenge => { cancelledPrompts++; return null; });
+        var cancelledRun=cancelled.Run(80,24); await cancelledRun.WaitAsync(TimeSpan.FromSeconds(10));
+        Check(cancelledPrompts == 1 && cancelled.State == ConnectionState.Closed, "cancelling an interactive challenge releases the SSH connection");
+
+        var rejectedPrompts=0;
+        using var rejected=TerminalConnectionFactory.Create(session, store, "", _=>true, _ => { rejectedPrompts++; return ["incorrect-code"]; });
+        var failure=await CaptureFailure(rejected.Run(80,24).WaitAsync(TimeSpan.FromSeconds(10)));
+        Check(rejectedPrompts == 1 && failure is Renci.SshNet.Common.SshAuthenticationException && rejected.State == ConnectionState.Closed,
+            "incorrect keyboard-interactive response fails authentication and releases the SSH connection");
     }
     static void Storage(string root)
     {

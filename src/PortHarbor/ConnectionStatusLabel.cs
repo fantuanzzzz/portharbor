@@ -30,7 +30,12 @@ internal sealed class ConnectionStatusLabel : Label
         {
             failed = true;
             Text = DiagnosticPresenter.Error(diagnostic);
+            UiTheme.Role(this, diagnostic.ErrorCode == ConnectionErrorCode.Cancelled ? UiRole.Warning : UiRole.Error);
         }
-        else if (!failed) Text = DiagnosticPresenter.Status(diagnostic);
+        else if (!failed)
+        {
+            Text = DiagnosticPresenter.Status(diagnostic);
+            UiTheme.Role(this, diagnostic.State == ConnectionState.Connected ? UiRole.Success : UiRole.Normal);
+        }
     }
 }

@@ -3,11 +3,38 @@ namespace PortHarbor;
 internal sealed class ConnectionTabs : TabControl
 {
     internal event Action<TabPage>? CloseRequested;
+    internal event Action<TabPage>? CloseOthersRequested;
+    internal event Action<TabPage>? RenameRequested;
+    internal event Action<TabPage>? CopyTitleRequested;
     internal ConnectionTabs()
     {
         Dock = DockStyle.Fill;
         DrawMode = TabDrawMode.OwnerDrawFixed;
+        ShowToolTips = true;
         Padding = new Point(24, 7);
+        var menu = new ContextMenuStrip();
+        menu.Items.Add("重命名标签…", null, (_, _) => { if (SelectedTab is { } page) RenameRequested?.Invoke(page); });
+        menu.Items.Add("复制标签标题", null, (_, _) => { if (SelectedTab is { } page) CopyTitleRequested?.Invoke(page); });
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("关闭其他标签…", null, (_, _) => { if (SelectedTab is { } page) CloseOthersRequested?.Invoke(page); });
+        menu.Items.Add("关闭当前标签…", null, (_, _) => { if (SelectedTab is { } page) CloseRequested?.Invoke(page); });
+        ContextMenuStrip = menu;
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+    }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var palette = UiTheme.Palette(this);
+        e.Graphics.Clear(palette.Subtle);
+        var content = DisplayRectangle; content.Inflate(1, 1);
+        using var fill = new SolidBrush(palette.Surface); e.Graphics.FillRectangle(fill, content);
+        using var edge = new Pen(palette.Border); e.Graphics.DrawRectangle(edge, content);
+        for (int i = 0; i < TabCount; i++)
+        {
+            TabPages[i].ToolTipText = TabPages[i].Text.Length > 16 ? TabPages[i].Text : "";
+            var bounds = GetTabRect(i);
+            if (bounds.IntersectsWith(e.ClipRectangle))
+                OnDrawItem(new DrawItemEventArgs(e.Graphics, Font, bounds, i, i == SelectedIndex ? DrawItemState.Selected : DrawItemState.None));
+        }
     }
     Rectangle CloseBounds(int index)
     {
@@ -18,12 +45,19 @@ internal sealed class ConnectionTabs : TabControl
     protected override void OnDrawItem(DrawItemEventArgs e)
     {
         var tab = TabPages[e.Index];
-        using var brush = new SolidBrush(e.Index == SelectedIndex ? Color.White : SystemColors.Control);
+        var palette = UiTheme.Palette(this);
+        using var brush = new SolidBrush(e.Index == SelectedIndex ? palette.Surface : palette.Subtle);
         e.Graphics.FillRectangle(brush, e.Bounds);
         var close = CloseBounds(e.Index);
         var text = new Rectangle(e.Bounds.Left + 8, e.Bounds.Top, Math.Max(0, close.Left - e.Bounds.Left - 12), e.Bounds.Height);
         TextRenderer.DrawText(e.Graphics, tab.Text, Font, text, ForeColor, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
-        using var pen = new Pen(Color.DimGray, 1.5f);
+        if (e.Index == SelectedIndex)
+        {
+            using var accent = new Pen(palette.HighContrast ? SystemColors.Highlight : palette.Accent, 2);
+            e.Graphics.DrawLine(accent, e.Bounds.Left, e.Bounds.Bottom - 2, e.Bounds.Right, e.Bounds.Bottom - 2);
+            if (Focused) ControlPaint.DrawFocusRectangle(e.Graphics, Rectangle.Inflate(text, -2, -3), palette.Text, palette.Surface);
+        }
+        using var pen = new Pen(palette.Muted, 1.5f);
         var cross = Rectangle.Inflate(close, -3, -3);
         e.Graphics.DrawLine(pen, cross.Left, cross.Top, cross.Right, cross.Bottom);
         e.Graphics.DrawLine(pen, cross.Right, cross.Top, cross.Left, cross.Bottom);

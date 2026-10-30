@@ -20,9 +20,18 @@ public sealed class TerminalScreen
     public bool BracketedPaste { get; private set; }
     public event Action<string>? Reply;
     Color fg = DefaultForeground, bg = DefaultBackground;
+    Color defaultFg = DefaultForeground, defaultBg = DefaultBackground;
     public Color ForegroundColor => fg;
     public Color BackgroundColor => bg;
-    public void SetDefaultColors(Color foreground, Color background) { fg = foreground; bg = background; }
+    public void SetDefaultColors(Color foreground, Color background)
+    {
+        var oldFg = defaultFg; var oldBg = defaultBg;
+        foreach (var row in History.Concat(Lines).Concat(primary ?? []))
+            for (int x = 0; x < row.Length; x++)
+                row[x] = row[x] with { Foreground = row[x].Foreground == oldFg ? foreground : row[x].Foreground,
+                    Background = row[x].Background == oldBg ? background : row[x].Background };
+        defaultFg = fg = foreground; defaultBg = bg = background;
+    }
     int state, savedX, savedY, top, bottom;
     bool wrapPending, alternate;
     Cell[][]? primary;
@@ -65,7 +74,7 @@ public sealed class TerminalScreen
                     case 'D': LineFeed(); break;
                     case 'M': if (Y == top) ScrollDown(); else Y = Math.Max(0, Y - 1); break;
                     case 'E': X = 0; LineFeed(); break;
-                    case 'c': fg = DefaultForeground; bg = DefaultBackground; X = Y = 0; Lines = Enumerable.Range(0, Rows).Select(_ => Blank()).ToArray(); break;
+                    case 'c': fg = defaultFg; bg = defaultBg; X = Y = 0; Lines = Enumerable.Range(0, Rows).Select(_ => Blank()).ToArray(); break;
                     case '(': case ')': state = 5; break;
                 }
                 continue;
@@ -151,10 +160,10 @@ public sealed class TerminalScreen
                 for (int i = 0; i < p.Length; i++)
                 {
                     int n = p[i];
-                    if (n == 0) { fg = DefaultForeground; bg = DefaultBackground; }
+                    if (n == 0) { fg = defaultFg; bg = defaultBg; }
                     else if (n == 7) (fg, bg) = (bg, fg);
-                    else if (n == 39) fg = DefaultForeground;
-                    else if (n == 49) bg = DefaultBackground;
+                    else if (n == 39) fg = defaultFg;
+                    else if (n == 49) bg = defaultBg;
                     else if (n is >= 30 and <= 37) fg = Palette[n - 30];
                     else if (n is >= 40 and <= 47) bg = Palette[n - 40];
                     else if (n is >= 90 and <= 97) fg = Palette[n - 90 + 8];

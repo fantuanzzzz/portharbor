@@ -12,10 +12,24 @@ root=pathlib.Path(args.root).resolve(); root.mkdir(parents=True,exist_ok=True)
 ftp_root=root/'ftp'; ftp_root.mkdir(exist_ok=True)
 sftp_root=root/'sftp'; sftp_root.mkdir(exist_ok=True)
 class Auth(paramiko.ServerInterface):
+    def __init__(self):
+        self.user=None; self.interactive_round=0
     def check_auth_password(self,user,password):
         self.user=user
         return paramiko.AUTH_SUCCESSFUL if user in {'easytest','stallchannel'} and password=='easytest-only' else paramiko.AUTH_FAILED
-    def get_allowed_auths(self,user): return 'password'
+    def check_auth_interactive(self,user,submethods):
+        self.user=user
+        if user not in {'keyboardtest','canceltest'}: return paramiko.AUTH_FAILED
+        self.interactive_round=1
+        return paramiko.InteractiveQuery('PortHarbor MFA','第一轮验证',('一次性验证码',False))
+    def check_auth_interactive_response(self,responses):
+        if self.user not in {'keyboardtest','canceltest'} or not responses: return paramiko.AUTH_FAILED
+        if self.interactive_round==1 and responses[0]=='otp-123':
+            self.interactive_round=2
+            return paramiko.InteractiveQuery('PortHarbor MFA','第二轮验证',('设备确认',False))
+        if self.interactive_round==2 and responses[0]=='device-yes': return paramiko.AUTH_SUCCESSFUL
+        return paramiko.AUTH_FAILED
+    def get_allowed_auths(self,user): return 'password,keyboard-interactive' if user in {'keyboardtest','canceltest'} else 'password'
     def check_channel_request(self,kind,channel): return paramiko.OPEN_SUCCEEDED if kind=='session' else paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
     def check_channel_pty_request(self,*args): return True
     def check_channel_shell_request(self,channel):

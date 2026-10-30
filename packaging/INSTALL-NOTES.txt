@@ -1,0 +1,28 @@
+PortHarbor 0.1.0 - private preview
+
+PortHarbor 0.1.0 私有预览版
+
+自带 .NET 8 桌面运行时，不需要单独安装 .NET 或管理员权限。
+程序默认放在 %LOCALAPPDATA%\Programs\PortHarbor，可选择其他目录。
+会话、凭据及偏好放在 %LOCALAPPDATA%\PortHarbor，与程序分开。
+请勿安装到便携副本或用户数据目录。本安装器不会导入或移动便携数据。
+升级前先退出 PortHarbor，再运行新安装器覆盖原目录。
+在 Windows 设置 → 应用中卸载；卸载保留会话、凭据、偏好和日志。
+第三方许可已嵌入程序，可在“帮助 → 第三方许可”查看。
+
+--- English ---
+
+This installer includes the .NET 8 Desktop Runtime. No separate .NET installation
+or administrator rights are needed. Windows 10 1809 or newer, x64, is required.
+
+Program files: %LOCALAPPDATA%\Programs\PortHarbor (or the folder you select).
+Sessions, credentials and preferences: %LOCALAPPDATA%\PortHarbor.
+Do not install into a portable copy or the user data directory.
+
+Run this installer again to update the same installation. Close PortHarbor first.
+Use Windows Settings > Apps > PortHarbor > Uninstall to remove the program.
+Uninstall preserves sessions, credentials, preferences, logs and unrecognized files.
+The installer does not import or move existing portable data.
+
+Third-party notices are embedded in PortHarbor: Help > Third-party licenses.
+PortHarbor itself has not been released under an open-source license.

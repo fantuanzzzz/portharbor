@@ -52,6 +52,41 @@ internal static partial class Program
         Check(Throws<ArgumentNullException>(() => picker.OpenFile(null!))
             && Throws<ArgumentNullException>(() => picker.SaveFile(null!)) && disposed == 6,
             "invalid picker requests are rejected before creating native dialogs");
+        string folderPath = Path.Combine(root, "existing-folder"); Directory.CreateDirectory(folderPath);
+        int foldersDisposed = 0;
+        picker = new WindowsFilePicker(owner, (_, _) => throw new Exception("unexpected file dialog"), (dialog, window) =>
+        {
+            dialog.Disposed += (_, _) => foldersDisposed++;
+            Check(ReferenceEquals(window, owner) && dialog.SelectedPath == folderPath && !dialog.ShowNewFolderButton,
+                "folder picker forwards the modal owner and existing path without allowing folder creation");
+            return DialogResult.OK;
+        });
+        Check(picker.SelectFolder(folderPath) == folderPath && foldersDisposed == 1,
+            "confirmed folder selection returns its path and disposes the native dialog");
+        picker = new WindowsFilePicker(owner, (_, _) => throw new Exception("unexpected file dialog"), (dialog, _) =>
+        { dialog.Disposed += (_, _) => foldersDisposed++; return DialogResult.Cancel; });
+        Check(picker.SelectFolder(folderPath) == null && foldersDisposed == 2,
+            "cancelled folder selection returns no path and disposes the native dialog");
+        picker = new WindowsFilePicker(owner, (_, _) => throw new Exception("unexpected file dialog"), (dialog, _) =>
+        { dialog.Disposed += (_, _) => foldersDisposed++; throw new IOException("fixture"); });
+        Check(Throws<IOException>(() => picker.SelectFolder(folderPath)) && foldersDisposed == 3
+            && Throws<ArgumentNullException>(() => picker.SelectFolder(null!)),
+            "folder picker startup failure releases its dialog and rejects null paths before creating one");
+        int multiDisposed = 0;
+        picker = new WindowsFilePicker(owner, (dialog, window) =>
+        {
+            var open = (OpenFileDialog)dialog; open.Disposed += (_, _) => multiDisposed++;
+            Check(ReferenceEquals(window, owner) && open.Multiselect && open.CheckFileExists && open.Filter == options.Filter,
+                "multi-file picker keeps the owner filter and existing-file requirements with multiselect enabled");
+            open.FileName = selected; return DialogResult.OK;
+        });
+        Check(picker.OpenFiles(options).SequenceEqual([selected]) && multiDisposed == 1 && !File.Exists(selected),
+            "multi-file selection returns paths without file I/O and disposes its dialog");
+        picker = new WindowsFilePicker(owner, (dialog, _) => { dialog.Disposed += (_, _) => multiDisposed++; return DialogResult.Cancel; });
+        Check(picker.OpenFiles(options).Count == 0 && multiDisposed == 2, "cancelled multi-file selection returns an empty batch");
+        picker = new WindowsFilePicker(owner, (dialog, _) => { dialog.Disposed += (_, _) => multiDisposed++; throw new IOException("fixture"); });
+        Check(Throws<IOException>(() => picker.OpenFiles(options)) && multiDisposed == 3 && Throws<ArgumentNullException>(() => picker.OpenFiles(null!)),
+            "multi-file picker releases its dialog after failure and rejects null options");
     }
 
     static void FilePickerUi(string root)

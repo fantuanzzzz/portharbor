@@ -12,8 +12,12 @@
     <Product>PortHarbor</Product>
     <Description>Lightweight Windows connection manager preview</Description>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <PortHarborPortableDefault Condition="'$(PublishSingleFile)' == 'true'">true</PortHarborPortableDefault>
   </PropertyGroup>
   <ItemGroup>
+    <AssemblyMetadata Include="PortHarbor.PortableDefault" Value="$(PortHarborPortableDefault)" />
+    <EmbeddedResource Include="../../THIRD-PARTY-NOTICES.md" LogicalName="PortHarbor.Licenses.NOTICES.md" />
+    <EmbeddedResource Include="../../licenses/*" LogicalName="PortHarbor.Licenses.%(Filename)%(Extension)" />
     <ProjectReference Include="../PortHarbor.Infrastructure/PortHarbor.Infrastructure.csproj" />
     <ProjectReference Include="../PortHarbor.Application/PortHarbor.Application.csproj" />
     <ProjectReference Include="../PortHarbor.Domain/PortHarbor.Domain.csproj" />

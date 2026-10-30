@@ -99,6 +99,10 @@ public sealed class TerminalConnection : ITerminalSession
                 if (decoded > 0) Output?.Invoke(new string(chars, 0, decoded));
             }
         }
+        catch (SshAuthenticationCancelledException)
+        {
+            Publish(ConnectionState.Closed, ConnectionStage.Closing, ConnectionErrorCode.Cancelled, false, "Connection cancelled.");
+        }
         catch (Exception) when (linked.IsCancellationRequested)
         {
             if (writeFailure == null) Publish(ConnectionState.Closed, ConnectionStage.Closing, ConnectionErrorCode.Cancelled, false, "Connection cancelled.");

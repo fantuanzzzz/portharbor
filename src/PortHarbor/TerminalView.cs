@@ -8,12 +8,15 @@ public sealed class TerminalView : Control
     public TerminalScreen Screen { get; } = new();
     public event Action<byte[]>? Input;
     public event Action<int, int>? TerminalResized;
-    readonly Font terminalFont;
+    Font? terminalFont;
+    ToolStripMenuItem copySelection = null!, rightPaste = null!;
     readonly ConcurrentQueue<string> output = new();
     readonly System.Windows.Forms.Timer timer = new() { Interval = 33 };
     int cw = 9, ch = 18, scroll;
     readonly VScrollBar scrollbar = new() { Dock = DockStyle.Right, Width = 18 };
     public event Action<Font>? FontChangedByUser;
+    public event Action? ReconnectRequested;
+    public event Action<string>? CopyFeedback;
     public bool CopyOnSelection { get; private set; }
     public bool PasteOnRightClick { get; private set; }
     Point? selectionStart, selectionEnd;
@@ -29,6 +32,8 @@ public sealed class TerminalView : Control
         Controls.Add(scrollbar);
         var menu = new ContextMenuStrip();
         menu.Items.Add("复制选择 / 全部  Ctrl+Shift+C", null, (_, _) => Copy());
+        menu.Items.Add("查找终端文本…  Ctrl+F", null, (_, _) => FindText());
+        menu.Items.Add("重新连接…", null, (_, _) => ReconnectRequested?.Invoke());
         menu.Items.Add("粘贴  Ctrl+Shift+V", null, (_, _) => Paste());
         var copyOnSelection = new ToolStripMenuItem("左键选取后自动复制") { CheckOnClick = true };
         copyOnSelection.CheckedChanged += (_, _) => CopyOnSelection = copyOnSelection.Checked;
@@ -40,13 +45,53 @@ public sealed class TerminalView : Control
         menu.Items.Add("终端字体…", null, (_, _) => ConfigureAppearance());
         menu.Items.Add("终端配色…", null, (_, _) => ConfigureColors());
         ContextMenuStrip = menu;
+        copySelection = copyOnSelection; rightPaste = pasteOnRightClick;
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(new ToolStripMenuItem("以上调整仅用于当前标签；全局默认在“设置”菜单") { Enabled = false });
+    }
+    public TerminalView(TerminalPreferences preferences) : this() => ApplyPreferences(preferences);
+    internal void ApplyPreferences(TerminalPreferences preferences)
+    {
+        preferences.Validate();
+        Font replacement;
+        using var fallback = CreateTerminalFont();
+        string name = InstalledFontNames().FirstOrDefault(n => n.Equals(preferences.FontFamily, StringComparison.OrdinalIgnoreCase)) ?? fallback.Name;
+        using var chosen = new FontFamily(name);
+        var style = (FontStyle)preferences.FontStyle;
+        if (!chosen.IsStyleAvailable(style)) style = FontStyle.Regular;
+        if (!chosen.IsStyleAvailable(style)) name = fallback.Name;
+        replacement = new Font(name, preferences.FontSize, style);
+        ReplaceTerminalFont(replacement);
+        ApplyColors(Color.FromArgb(unchecked((int)0xFF000000) | preferences.ForegroundRgb), Color.FromArgb(unchecked((int)0xFF000000) | preferences.BackgroundRgb));
+        copySelection.Checked = preferences.CopyOnSelection; rightPaste.Checked = preferences.PasteOnRightClick;
+    }
+    void ApplyColors(Color foreground, Color background)
+    {
+        Screen.SetDefaultColors(foreground, background);
+        ForeColor = foreground; BackColor = background; Invalidate();
+    }
+    void ReplaceTerminalFont(Font replacement)
+    {
+        // WinForms retains its existing instance when the new font compares equal.
+        // Dispose only the instance that the control no longer uses.
+        if (Font.Equals(replacement)) { replacement.Dispose(); return; }
+        var previous = terminalFont;
+        Font = terminalFont = replacement;
+        previous?.Dispose();
     }
     internal static Font CreateTerminalFont()
     {
-        using var installed = new System.Drawing.Text.InstalledFontCollection();
+        var installed = InstalledFontNames();
         foreach (string name in new[] { "Consolas", "Cascadia Mono", "Lucida Console", "Courier New" })
-            if (installed.Families.Any(f => f.Name.Equals(name, StringComparison.OrdinalIgnoreCase))) return new Font(name, 11);
+            if (installed.Contains(name, StringComparer.OrdinalIgnoreCase)) return new Font(name, 11);
         return new Font(FontFamily.GenericMonospace, 11);
+    }
+    internal static string[] InstalledFontNames()
+    {
+        using var installed = new System.Drawing.Text.InstalledFontCollection();
+        var families = installed.Families;
+        try { return families.Select(f => f.Name).ToArray(); }
+        finally { foreach (var family in families) family.Dispose(); }
     }
     protected override void OnFontChanged(EventArgs e) { base.OnFontChanged(e); RecalculateCells(); }
     protected override void OnDpiChangedAfterParent(EventArgs e) { base.OnDpiChangedAfterParent(e); RecalculateCells(); }
@@ -71,7 +116,7 @@ public sealed class TerminalView : Control
     {
         using var dialog = new FontDialog { Font = Font, ShowColor = false };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
-        Font = new Font(dialog.Font.FontFamily, dialog.Font.Size, dialog.Font.Style, GraphicsUnit.Point);
+        ReplaceTerminalFont(new Font(dialog.Font.FontFamily, dialog.Font.Size, dialog.Font.Style, GraphicsUnit.Point));
         FontChangedByUser?.Invoke(Font);
     }
     void ConfigureColors()
@@ -80,8 +125,7 @@ public sealed class TerminalView : Control
         if (foreground.ShowDialog(this) != DialogResult.OK) return;
         using var background = new ColorDialog { Color = Screen.BackgroundColor, FullOpen = true };
         if (background.ShowDialog(this) != DialogResult.OK) return;
-        Screen.SetDefaultColors(foreground.Color, background.Color);
-        ForeColor = foreground.Color; BackColor = background.Color; Invalidate();
+        ApplyColors(foreground.Color, background.Color);
     }
 
     void Send(string value) { scroll = 0; selectionStart = selectionEnd = null; Input?.Invoke(Encoding.UTF8.GetBytes(value)); Invalidate(); }
@@ -102,7 +146,30 @@ public sealed class TerminalView : Control
             value = text.ToString();
         }
         else value = Screen.Text;
-        try { if (value.Length > 0) Clipboard.SetText(value); } catch (System.Runtime.InteropServices.ExternalException) { }
+        try { if (value.Length > 0) { Clipboard.SetText(value); CopyFeedback?.Invoke($"已复制 {value.Length} 个字符"); } else CopyFeedback?.Invoke("没有可复制的终端文本"); }
+        catch (System.Runtime.InteropServices.ExternalException) { CopyFeedback?.Invoke("剪贴板当前不可用"); }
+    }
+    internal int FindText(string query, int start = 0)
+    {
+        if (string.IsNullOrEmpty(query)) return -1;
+        var rows = Screen.History.Concat(Screen.Lines).ToArray();
+        start = Math.Clamp(start, 0, rows.Length);
+        for (int i = start; i < rows.Length; i++)
+        {
+            string text = string.Concat(rows[i].Select(c => c.Text));
+            int column = text.IndexOf(query, StringComparison.CurrentCultureIgnoreCase);
+            if (column < 0) continue;
+            scroll = Math.Clamp(rows.Length - Screen.Rows - i, 0, Screen.History.Count);
+            SyncScrollbar(); Invalidate(); Focus(); return i;
+        }
+        CopyFeedback?.Invoke($"终端缓冲中没有匹配“{query}”的文本"); return -1;
+    }
+    void FindText()
+    {
+        var query = TextPrompt.Ask(this, "查找终端", "查找现有终端缓冲中的文本");
+        if (query == null) return;
+        int row = FindText(query);
+        if (row >= 0) CopyFeedback?.Invoke($"找到“{query}”，缓冲行 {row + 1}");
     }
     public void Paste()
     {
@@ -115,6 +182,7 @@ public sealed class TerminalView : Control
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
+        if (e.Control && e.KeyCode == Keys.F) { FindText(); e.SuppressKeyPress = true; return; }
         if (e.Control && e.Shift && e.KeyCode == Keys.C) { Copy(); e.SuppressKeyPress = true; return; }
         if (e.Control && e.Shift && e.KeyCode == Keys.V) { Paste(); e.SuppressKeyPress = true; return; }
         string prefix = Screen.ApplicationCursor ? "\x1bO" : "\x1b[";
@@ -158,7 +226,7 @@ public sealed class TerminalView : Control
         }
         if (Focused && scroll == 0 && Screen.CursorVisible) { using var pen = new Pen(Color.LightSkyBlue, 2); e.Graphics.DrawLine(pen, 6 + Screen.X * cw, 4 + (Screen.Y + 1) * ch - 2, 6 + (Screen.X + 1) * cw - 1, 4 + (Screen.Y + 1) * ch - 2); }
     }
-    protected override void Dispose(bool disposing) { if (disposing) { timer.Dispose(); terminalFont.Dispose(); scrollbar.Dispose(); ContextMenuStrip?.Dispose(); } base.Dispose(disposing); }
+    protected override void Dispose(bool disposing) { if (disposing) { timer.Dispose(); terminalFont?.Dispose(); scrollbar.Dispose(); ContextMenuStrip?.Dispose(); } base.Dispose(disposing); }
 }
 
 

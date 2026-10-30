@@ -3,14 +3,14 @@ using System.Runtime.ExceptionServices;
 
 namespace PortHarbor;
 
-internal sealed class SshTerminalTransport(SshProtocolConfiguration session, IHostKeyTrust trust, string password, Func<string, bool> confirm) : StreamTerminalTransport
+internal sealed class SshTerminalTransport(SshProtocolConfiguration session, IHostKeyTrust trust, string password, Func<string, bool> confirm, SshAuthenticationPromptHandler? prompt = null) : StreamTerminalTransport
 {
     ShellStream? shell;
     ExceptionDispatchInfo? connectionFailure;
     protected override async Task OpenAsync(int columns, int rows, Action<ConnectionStage> reportStage, CancellationToken token)
     {
         reportStage(ConnectionStage.Authenticating);
-        var info = SshClientSupport.SshInfo(session.Host, session.Port, session.Username, session.PrivateKey, password, out var key);
+        var info = SshClientSupport.SshInfo(session.Host, session.Port, session.Username, session.PrivateKey, password, out var key, prompt);
         if (key != null) Own(key);
         var client = Own(new SshClient(info));
         SshClientSupport.HostKey(client, session.Host, session.Port, trust, confirm, reportStage);

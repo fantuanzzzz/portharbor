@@ -13,37 +13,49 @@
 | RDP | 启动 Windows 自带的 mstsc，支持端口、用户名、全屏和剪贴板设置 |
 | FTP | 被动模式，普通 FTP 或显式 TLS，浏览、上传、下载、重命名、新建目录、删除文件或空目录 |
 | SFTP | SSH 密码或私钥登录、主机密钥校验，与 FTP 相同的基础文件管理 |
+| 文件工作流 | 路径导航、列排序、多文件串行上传/下载队列、逐项进度与结果、失败暂停及核对后继续/重试、取消与可等待关闭 |
+| SSH 认证 | 密码/私钥认证之外支持 keyboard-interactive 多轮挑战、隐藏输入、取消；SSH 终端与 SFTP 共用认证规则 |
 | Serial | COM 口、波特率、数据位、校验、停止位和流控设置 |
 | Shell | Windows ConPTY 内嵌交互命令行，可配置程序、参数和工作目录 |
-| 会话 | 保存、分类文件夹（图标、嵌套和空分类）、搜索、复制、编辑、删除、JSON 导入和导出、多标签连接 |
+| 会话 | 保存、分类文件夹（图标、嵌套和空分类）、收藏、最近连接、搜索、复制、重命名、编辑、按协议字段分组、就地校验、密码显示、路径选择、删除、JSON 导入和导出、多标签连接 |
 | 密码 | 可选保存，主密码加密；安装版叠加 Windows 用户级 DPAPI；导出会话不含密码 |
 
 ## 运行
 
+当前源码已实现 P01–P10，包含单文件便携交付与安装向导；旧体验包不会随源码自动更新。发行方式与数据保留见[发行说明](docs/DISTRIBUTION.md)，认证规则见[SSH 认证说明](docs/SSH-AUTHENTICATION.md)。
+
 需要 Windows 10 1809 或更新版本 / Windows 11，x64。
 
-预览阶段提供两个 x64 目录包，默认都需要 .NET 8 Desktop Runtime x64：
+新体验包在 `artifacts/releases/`，两种都自带 .NET 8 Desktop Runtime，无需另装 .NET：
 
-- `PortHarbor-0.1.0-installed-win-x64.zip`：安装版目录布局，配置放在用户目录。目前是 ZIP 预览包，尚未提供安装向导。
-- `PortHarbor-0.1.0-portable-win-x64.zip`：便携版，解压到可写目录，直接运行 `PortHarbor.exe`；首次启动在程序旁创建 `PortHarbor.ini`。整个目录可一起移动。
+- `PortHarbor-0.1.0-portable-win-x64.exe`：单文件便携版，放到可写目录双击运行；首次启动在程序旁创建 `PortHarbor.ini`，后续按使用情况生成偏好和日志。移动时携带整个使用目录。
+- `PortHarbor-0.1.0-setup-win-x64.exe`：中文/英文安装向导，默认安装至 `%LOCALAPPDATA%\Programs\PortHarbor`，数据在 `%LOCALAPPDATA%\PortHarbor`。创建开始菜单及 Windows 卸载入口，升级/卸载保留用户数据。
 
-安装版目录中的 `Start-PortHarbor.cmd` 会检测运行环境。`-IncludeRuntime` 仅控制两种包是否包含 .NET 环境，与安装/便携数据模式独立。
+单文件指交付时只有一个 EXE；.NET 原生组件运行时可能解包到用户临时缓存。第三方许可已嵌入程序，在“帮助 → 第三方许可”查看。历史 `*-installed-*.zip` 只是目录布局，仍可由原构建流程生成；`-IncludeRuntime` 控制历史目录包是否自带运行时，与数据模式独立。
 
 应用需要 Windows 系统组件支持 RDP、ConPTY 和 DPAPI；RDP 使用 Windows 自带的远程桌面客户端。
 
 菜单分为「文件 / 会话 / 窗口 / 设置 / 帮助」，各项操作在下拉菜单中。
 
+「设置 → 界面主题」可选择浅色或深色，即时应用并在重启后保留。界面字体、按钮层级、选中/焦点和错误状态采用共享样式；终端仍使用自己的字体和配色。高对比度优先 Windows 系统颜色；标题栏、滚动条和系统弹窗沿用系统外观。样本及覆盖范围见[视觉规范](docs/VISUAL-DESIGN.md)。
+
+菜单下的操作栏提供新建连接、连接、编辑、搜索和会话库切换；选择会话后可直接连接/编辑。`Ctrl+Shift+F` 搜索，`Ctrl+Shift+B` 显示/隐藏会话库，`F6` / `Shift+F6` 切换搜索、会话树和工作区；会话树内 Enter 连接、F2 编辑。窗口正常大小/位置、最大化状态和侧栏宽度/显隐自动记忆；「窗口 → 恢复默认布局」可重置，恢复时将窗口限制到现有屏幕工作区。布局示意、保存及恢复约定见[工作台布局](docs/WORKSPACE-LAYOUT.md)。
+
 「帮助 → 平台能力」可查看本地 Shell、串口、RDP 及 Windows 凭据保护的运行支持。缺少支持时，编辑器会说明原因并禁用连接，仍可仅保存会话；已有会话的连接页提供「重新检查」，系统支持恢复后可继续连接。串口列表为空或无法读取时仍允许手动输入端口；能力可用不保证设备访问或远程登录成功。
 
 「会话 → 新建根分类」创建顶层文件夹；选中文件夹后用「新建子分类」或右键同名操作创建下一级，可继续嵌套。空分类也会保存。文件夹、终端、远程桌面和文件传输有不同图标。新建会话默认使用当前分类，编辑器支持输入 `工作/交换机/核心` 这样的完整路径；`/` 是分类层级分隔符。搜索命中深层会话时保留祖先文件夹。
 
-终端默认选择已安装的 Consolas，并依次尝试 Cascadia Mono、Lucida Console、Courier New 和系统等宽字体；按字体及 DPI 计算字符格。终端右键菜单可打开字体、字号、样式、前景色和背景色设置；左键自动复制与右键直接粘贴也可在菜单中分别启用。
+会话库可切换「全部 / 收藏 / 最近」；会话菜单或右键菜单可收藏、重命名及分别清空收藏/最近。最近保留 20 个已保存会话的连接尝试，不代表登录成功。搜索框支持清空、无结果提示、上下键定位和 Enter 连接；新增、复制或创建分类后会定位结果。记录重启保留，仅关联会话 ID 与尝试时间，连接继续读取当前配置及原密码库。操作与失败处理见[会话库说明](docs/SESSION-LIBRARY.md)。
+
+终端默认选择已安装的 Consolas，并依次尝试 Cascadia Mono、Lucida Console、Courier New 和系统等宽字体；按字体及 DPI 计算字符格。「设置 → 终端默认设置」可预览并保存字体、字号、样式、前景/背景、选取复制和右键粘贴偏好，供新标签和重启后使用；恢复默认后需点击保存。终端右键菜单的调整仅作用于当前标签。找不到指定字体时安全回退，多行粘贴仍需确认。偏好文件及异常处理见[终端约定](docs/TERMINAL-SESSIONS.md#终端默认偏好)。
 
 点击「新建连接」或首页协议按钮，填写参数后选择「保存并连接」或「仅保存」。左侧双击已保存会话即可连接。Shell 默认使用 Windows PowerShell；也可以设置 `cmd.exe`，参数 `/Q`，或已安装的 `pwsh.exe`。
 
 快捷键：`Ctrl+N` 新建，`Ctrl+W` 关闭标签；终端内 `Ctrl+Shift+C` 复制选择内容（没有选择时复制全部），`Ctrl+Shift+V` 粘贴，鼠标滚轮查看历史。多行粘贴会要求确认。双击标签标题、点击标签右侧 ×、中键点击或使用「窗口」菜单均可关闭标签，关闭前会要求确认；退出软件时若仍有会话标签，也会确认。
 
 RDP 在系统窗口中打开，登录由 Windows 客户端处理。PortHarbor 保存的 RDP 密码不会自动注入 Windows 凭据管理器；有密码时可在标签中点击复制，30 秒后尝试清除本次复制的内容。关闭标签不会关闭远程桌面窗口。
+
+FTP/SFTP 文件列表支持表头排序、保留选择及目录优先；空目录与加载失败分别提示，未选文件时下载禁用。路径框输入后按 Enter 或「前往」导航，修改操作始终使用最近成功加载的目录。传输显示累计字节、真实已知总量和平均速率，未知大小不显示百分比；取消后需刷新并核对结果。详细约定见[文件视图工作流](docs/FILE-WORKFLOW.md)。
 
 ## 数据与密码
 
@@ -76,7 +88,7 @@ RDP 在系统窗口中打开，登录由 Windows 客户端处理。PortHarbor �
 ## 已知范围
 
 - 内置终端支持 UTF-8、基础 ANSI/VT、光标移动、滚动区、16/256/真彩色、备用屏幕、CJK 双宽字符和 2000 行历史；尚未达到完整 xterm 兼容性，复杂 TUI、输入法组合、多种编码和终端鼠标协议仍需后续完善。
-- 文件视图一次执行一个操作，暂不提供递归目录传输、断点续传、传输队列或自动重连。FTP/SFTP 操作使用异步调用，每个操作有超时并传递取消；底层库或服务器响应取消仍有延迟时，关闭会等待当前操作及有限时长的远端临时文件清理。
+- 文件视图支持多文件串行传输队列，每个文件标签一次执行一个操作；暂不提供递归目录传输、断点续传或自动重连。FTP/SFTP 操作使用异步调用，每个操作有超时并传递取消；底层库或服务器响应取消仍有延迟时，关闭会等待当前操作及有限时长的远端临时文件清理。失败暂停等待任务，核对结果后显式继续或重试。
 - 下载先写本地临时文件，完成后替换目标。上传先写远程 `.part`，再重命名。SFTP 暂存旧文件后再重命名替换，失败恢复和成功后的备份清理各自限时 5 秒；替换期间目标路径可能短暂不存在，断线或确认丢失时需通过新连接核对目标及 `.part` / `.bak`，不自动重放。FTP 覆盖取决于服务器语义。
 - RDP 采用外部系统客户端，没有内嵌桌面或自动填写密码；串口没有实体设备检测报告。
 - 暂不包含 X11、代理跳板、SSH Agent、隧道、宏、自动化脚本、连接日志或自动更新。
@@ -96,7 +108,16 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 .\build.ps1 -Dotnet 'D:\Code\rea-work\tools\dotnet\dotnet.exe' -PackageSource 'D:\Code\rea-work\tools\nuget-feed'
 ```
 
-脚本在项目内缓存构建数据，使用锁定模式恢复依赖，执行差异空白检查、编译、核心/Windows 检查和发布包启动冒烟，然后同时生成安装版目录布局和便携版 ZIP，放在 `artifacts`。默认都不包含 .NET 环境；需要包含时运行 `./build.ps1 -IncludeRuntime`。安装向导尚未实现。依赖版本与哈希见 `src\PortHarbor\packages.lock.json`。
+该命令保留原工程验收流程：项目内缓存、锁定依赖恢复、编译、核心/Windows 检查和发布冒烟，生成历史安装目录布局/便携 ZIP 到 `artifacts`；默认不含 .NET，可用 `-IncludeRuntime`。依赖版本与哈希见 `src\PortHarbor\packages.lock.json`。
+
+生成新的单文件便携版与安装向导，使用 PowerShell 7：
+
+```powershell
+pwsh -File packaging/Get-InnoSetup.ps1 -Download
+pwsh -File build.ps1 -P10
+```
+
+工具仅缓存到 `.build-home`；最终四个产物在 `artifacts/releases`，发行检查与日志在 `artifacts/distribution-validation`。P10 构建执行单文件发布和隔离安装/模拟升级/卸载验收；原有核心、系统、UI、协议回归仍使用上面的工程入口。详见[发行说明](docs/DISTRIBUTION.md)。
 
 发布冒烟会等待实际 EXE 退出并检查退出码，分别验证隔离数据目录的安装模式，以及不指定 `--data-dir` 的默认便携首次启动和重启；便携模式必须在程序旁创建 INI。报告为 `startup-smoke-results.json`，冒烟生成的空配置不进入发行包。
 
@@ -128,7 +149,7 @@ build.ps1                       构建和发布
 
 最终完整扩展基线通过 Application 175、核心 366、Windows 17、协议 96、UI 61，共 **715 项检查及四项冒烟**，Release 编译 0 警告、0 错误。报告与双版本 ZIP 在 ignored `artifacts/technical-closure/release/`。既有 SFTP 提交/恢复的 9 个故障场景继续通过；确认丢失仍需显式核对，不自动重放。
 
-当前 Windows 技术主线清单完成 **49/51 项**，剩余 T6 标准测试迁移和物理断网/串口等环境故障验收；真实 RDP、FTPS、私钥及多服务器互通继续专项验证。可以进入当前 WinForms UI、功能和体验开发，下一步建议持久化终端字体、配色及复制粘贴偏好。详见[技术方案第 8 节](docs/TECHNICAL-PLAN.md#8-分阶段实施)。该比例是清单统计，不是工时或源码覆盖率；新平台/更换框架属于阶段 4，正式安装向导和单文件便携包尚未实现。
+当前 Windows 技术主线清单完成 **49/51 项**，剩余 T6 标准测试迁移和物理断网/串口等环境故障验收；真实 RDP、FTPS、私钥及多服务器互通继续专项验证。产品 P01–P10 已实现，P10 增加单文件便携与当前用户安装向导，升级/卸载保留数据。干净 Windows 发行验收、多 DPI/高对比度及真实服务器体验待补，当前证据见[发行说明](docs/DISTRIBUTION.md)及[技术方案第 13 节](docs/TECHNICAL-PLAN.md#13-用户体验ui-交互与美观功能开发计划)。该比例是清单统计，不是工时或源码覆盖率；新平台/更换框架属于阶段 4。
 
 上一轮 SSH 掉线及 FTP 连接失败诊断的完整结果为 583 项，报告为 ignored `artifacts/network-failures/release/engineering-baseline.json`。这些正常退出、主动取消、拒绝连接、连接重置与错误密码场景均在本轮继续回归，不引入自动重连。
 
@@ -146,6 +167,8 @@ dotnet run --project tests/PortHarbor.Checks -c Release -- --terminal --results 
 dotnet run --project tests/PortHarbor.Application.Checks -c Release -- --results artifacts/application-results.json
 dotnet run --project tests/PortHarbor.Checks -c Release -- --windows --results artifacts/windows-results.json
 dotnet run --project tests/PortHarbor.Checks -c Release -- --ui "$env:TEMP\portharbor-ui.png"
+dotnet run --project tests/PortHarbor.Checks -c Release -- --ui-preferences "$env:TEMP\portharbor-preferences.png"
+dotnet run --project tests/PortHarbor.Checks -c Release -- --ui-workspace "$env:TEMP\portharbor-workspace.png"
 dotnet run --project tests/PortHarbor.Checks -c Release -- --ui-shell "$env:TEMP\portharbor-terminal.txt"
 ```
 
