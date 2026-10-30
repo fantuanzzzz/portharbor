@@ -17,6 +17,22 @@ namespace PortHarbor.BuildTools
 
     public static class ShortcutInspection
     {
+        // Only used by regression fixtures; do not rely on the legacy WScript shortcut setter for Unicode paths.
+        public static void CreateFixture(string path, string target, string arguments, string directory)
+        {
+            var shellLink = Activator.CreateInstance(Type.GetTypeFromCLSID(
+                new Guid("00021401-0000-0000-C000-000000000046"), true));
+            try
+            {
+                var link = (IShellLinkW)shellLink;
+                link.SetPath(Path.GetFullPath(target));
+                link.SetArguments(arguments);
+                link.SetWorkingDirectory(Path.GetFullPath(directory));
+                ((IPersistFile)shellLink).Save(Path.GetFullPath(path), true);
+            }
+            finally { if (shellLink != null) Marshal.FinalReleaseComObject(shellLink); }
+        }
+
         // Read via the Unicode Shell interface. Do not resolve or launch the shortcut.
         public static ShortcutDetails Read(string path)
         {

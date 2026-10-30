@@ -18,12 +18,9 @@ function Assert([bool]$Condition, [string]$Name) {
     if (-not $Condition) { throw "FAIL: $Name" }
     $checks.Add($Name); Write-Host "PASS: $Name"
 }
-$shell = New-Object -ComObject WScript.Shell
 function New-Shortcut([string]$Name, [string]$Target, [string]$Arguments = '') {
     $path = Join-Path $fixture $Name
-    $link = $shell.CreateShortcut($path)
-    try { $link.TargetPath = $Target; $link.Arguments = $Arguments; $link.WorkingDirectory = $directory; $link.Save() }
-    finally { [Runtime.InteropServices.Marshal]::ReleaseComObject($link) | Out-Null }
+    [PortHarbor.BuildTools.ShortcutInspection]::CreateFixture($path, $Target, $Arguments, $directory)
     return $path
 }
 $failure = $null
@@ -47,7 +44,6 @@ try {
 }
 catch { $failure = $_.Exception.Message; throw }
 finally {
-    [Runtime.InteropServices.Marshal]::ReleaseComObject($shell) | Out-Null
     [pscustomobject]@{ Passed = $checks.Count; Failure = $failure; Checks = @($checks) } | ConvertTo-Json -Depth 4 |
         Set-Content -LiteralPath (Join-Path $fixture 'shortcut-results.json') -Encoding UTF8
 }

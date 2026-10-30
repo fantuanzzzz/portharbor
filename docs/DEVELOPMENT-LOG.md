@@ -4,6 +4,8 @@
 
 ## 2026-10-30 - GitHub 发行验收失败排查
 
+- 用户再次打包时，已从干净提交 `24dcc6e` 生成 v0.2.0，manifest `Dirty=false`；完整本机发行检查 15 项通过。可上传文件单独集中 `artifacts/github-upload/v0.2.0/`（两个 EXE 和只校验这两个附件的 SHA256SUMS）；完整 manifest/许可/说明保留在 `artifacts/releases/v0.2.0/`。打包后提供的 #11 失败日志引出的样本写入修复为构建测试改动，不改变此已构建程序；后续修复尚需提交推送确认云端。
+- 后续用户提供 #11 新日志，错误发生在专项样本的 `$link.TargetPath = $Target`，WScript.Shell 在 runner 创建中文目标时抛出 `Value does not fall within the expected range`。将专项样本写入也改为 `IShellLinkW` / `IPersistFile.Save`，移除测试中的 WScript.Shell 依赖；不跳过中文路径测试或降低生产快捷方式校验。该后续修复仅影响构建测试，不进入用户软件。
 - 用户报告 main 与 v0.2.0 的 Windows CI #9/#10 失败。公开 jobs 记录确认两次均使用 `17dbe6b`：Windows validate、Linux/macOS core 全部成功，distribution 的 Build and validate isolated distribution 失败，Inno Setup 获取成功。
 - 用户提供详细日志：程序编译、便携启动、隔离安装和快捷方式创建均通过，失败在 `Start Menu shortcut targets the installed executable`。旧脚本通过 WScript.Shell 读取后只比较路径文字；没有输出实际目标，不能仅凭这一断言证明具体是哪种路径/编码差异，也不代表软件上传失败。
 - 修正为 `IShellLinkW` Unicode 读取、打开目标/期望文件核对卷和文件 ID；目标必须确为安装的 EXE 且没有附加参数，不以相同文件内容放宽校验。仅构建测试使用，不改应用连接/存储或安装器真实目标。

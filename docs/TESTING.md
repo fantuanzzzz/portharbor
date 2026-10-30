@@ -67,3 +67,5 @@ pwsh -File scripts/Check-CodeStyle.ps1 -Fix
 CI 在 Linux/macOS 的 core matrix 仅恢复/构建/执行 net8.0 纯核心测试；Windows validate 上传标准 TRX/Cobertura 和旧 JSON/UI 证据。两类通过后独立 distribution job 获取验签的 Inno Setup 并运行 P10。工作流更新不等于 GitHub 已实际运行通过；首次推送后应查看 core 的两个平台、validate 和 distribution。没有将 WinForms/串口/RDP 放到非 Windows runner，也不表示产品支持非 Windows UI。真实环境项目及记录格式见[实机验收手册](REAL-ENVIRONMENT-ACCEPTANCE.md)。
 
 发行快捷方式校验通过 `IShellLinkW` 读取 Unicode 目标，再用已打开文件的卷标识和文件 ID 判断是否确为安装的 EXE，不把路径字符串相等或文件内容相同当作同一个文件。仅读取，不解析启动或执行 `.lnk`。失败时控制台输出期望目标、实际目标、参数与文件身份比较结果；`shortcut-details.json` 与安装/升级/卸载测试日志作为 distribution-evidence 上传。原 GitHub #9/#10 的错误日志未记录实际目标，具体路径差异仍需修复后的 runner 证据确认。
+
+专项的合成 `.lnk` 也用 `IShellLinkW` 和 `IPersistFile.Save` 创建，避免英文 runner 中 WScript.Shell 设置中文 TargetPath 抛出范围异常（#11 日志已定位）；样本只写入 ignored artifacts，不执行。此写入方法不用于安装器或应用，七项校验内容保持不变。
