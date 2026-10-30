@@ -44,6 +44,12 @@ public sealed partial class MainForm : Form
         remoteDesktop = new RdpLauncher(remoteDesktopLauncher, store.Paths);
         this.createTerminal = createTerminal ?? ((session, password, confirm) => TerminalConnectionFactory.Create(session, configuration, password, confirm, PromptSshAuthentication));
         Text = "PortHarbor · 轻量连接工作台"; Size = new Size(1250, 820); MinimumSize = new Size(850, 560);
+        using (var stream = typeof(MainForm).Assembly.GetManifestResourceStream("PortHarbor.AppIcon.ico")!)
+        using (var sourceIcon = new Icon(stream, new Size(32, 32)))
+        {
+            var windowIcon = (Icon)sourceIcon.Clone(); Icon = windowIcon;
+            Disposed += (_, _) => windowIcon.Dispose();
+        }
         StartPosition = FormStartPosition.CenterScreen; Font = UiTheme.BodyFont; AutoScaleMode = AutoScaleMode.Dpi;
         var toolbar = new MenuStrip { BackColor = Color.White, Padding = new Padding(8, 5, 8, 5) };
         MainMenuStrip = toolbar;

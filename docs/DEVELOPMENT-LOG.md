@@ -2,6 +2,23 @@
 
 本文保留公开发行和持续开发需要的重要里程碑。完整逐轮调试/交接流水与过期验收快照已归入本地忽略目录；当前范围以[技术方案](TECHNICAL-PLAN.md)、[测试说明](TESTING.md)和[实机验收手册](REAL-ENVIRONMENT-ACCEPTANCE.md)为准。
 
+## 2026-10-30 - GitHub 发行验收失败排查
+
+- 用户报告 main 与 v0.2.0 的 Windows CI #9/#10 失败。公开 jobs 记录确认两次均使用 `17dbe6b`：Windows validate、Linux/macOS core 全部成功，distribution 的 Build and validate isolated distribution 失败，Inno Setup 获取成功。
+- 用户提供详细日志：程序编译、便携启动、隔离安装和快捷方式创建均通过，失败在 `Start Menu shortcut targets the installed executable`。旧脚本通过 WScript.Shell 读取后只比较路径文字；没有输出实际目标，不能仅凭这一断言证明具体是哪种路径/编码差异，也不代表软件上传失败。
+- 修正为 `IShellLinkW` Unicode 读取、打开目标/期望文件核对卷和文件 ID；目标必须确为安装的 EXE 且没有附加参数，不以相同文件内容放宽校验。仅构建测试使用，不改应用连接/存储或安装器真实目标。
+- 新增中文/空格、大小写、别名、同内容不同文件、附加参数、空目标及缺失目标的 7 项专项；本机全部通过并接入 CI。失败控制台和 artifact 增加 shortcut-details、报告摘要和隔离安装日志。
+- 新代码待用户提交推送后在 GitHub runner 复核；旧 run 不会因本地修改自动变为成功。Node.js action 运行时弃用信息为警告，不是本次日志的失败点；本批未因此调整 action 主版本。
+- 修正后完整 P10 本机 15/15 通过，shortcut-details 证实已安装开始菜单目标与安装 EXE 为同一文件且无附加参数；输出在 `artifacts/ci-failure-review/release/`，不替换用户待上传包。公开 Markdown 引用、脚本语法和变更源码格式检查通过。云端同一 Runner 的修复结果仍须推送后确认，未据本地通过断言旧日志缺失的具体路径差异已被证明。
+
+## 2026-10-30 - 应用图标
+
+- 新增蓝色圆角底、白色港湾、青色 `>_` 的原生矢量图标，保留 SVG、512 px PNG 和八尺寸 RGBA ICO；Windows 绘图脚本从 SVG 重新生成，无外部素材依赖。
+- 应用 EXE、主窗口标题/任务切换、安装器使用同一图标，快捷方式和卸载入口继承 EXE 图标；GitHub 首页展示 SVG。会话树原协议图标不变，主窗口独立 Icon 在释放时销毁。
+- 继续沿用 0.2.0 及 MIT 个人署名 fantuanzzzz；GitHub 附件需由本批源码重新生成，同名文件哈希会变化，旧 SHA256SUMS 不能混用。
+- Release 编译 0 警告/0 错误，24 项工作台 UI 检查和 15 项隔离发行检查通过；已核对主窗口截图及从实际便携 EXE、安装器抽取的图标。八个 ICO 尺寸/透明通道校验与 SVG 重生成字节一致性检查通过。
+- 带图标 v0.2.0 包已更新到 `artifacts/releases/v0.2.0/`，SHA256SUMS 全部重算；便携 EXE 75,119,127 字节，安装器 70,955,586 字节。本地报告 `artifacts/distribution-validation/d3010ef024a445369e380f16219469d6/distribution-results.json`，未提交或推送图标增量。
+
 ## 2026-10-30 - v0.2.0 发行构建
 
 - 按作者指定，将项目 MIT 署名改为 `Copyright (c) 2026 fantuanzzzz`，同步程序关于、程序集版权、项目首页、安装说明与许可声明；第三方版权不变。

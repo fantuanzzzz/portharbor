@@ -47,4 +47,6 @@ manifest schema 2 补入提交号、Dirty、源码文件内容摘要、SDK、实
 
 新实例取得数据目录的 `.portharbor.lock` 独占句柄后才加载数据；同目录的其他窗口会收到明确提示，不同目录可并行。RDP 文件放在 `rdp-temporary/<GUID>/`，有独占归属锁和客户端 PID/启动时间；启动与下次 RDP 前清理可证明已结束的遗留文件。未知归属、仍运行/无法核实的客户端、启动身份记录空窗、旧根目录 `.rdp` 均保守保留，详见手册 E09。
 
+安装验收通过 Unicode Shell 接口读取快捷方式，按实际文件身份核对目标及无附加参数；不依赖中文路径、长短路径或目录别名的字面形式。`packaging/ShortcutInspection.cs` 仅用于构建测试，不打入用户程序；失败时检查 `shortcut-details.json` 和 distribution-results 的 Failure。专项命令见[测试说明](TESTING.md)。
+
 本机验收不等于无 .NET 的干净 Windows 验收。完整环境、步骤、预期与证据要求见[实机验收手册](REAL-ENVIRONMENT-ACCEPTANCE.md)；测试入口见[测试说明](TESTING.md)。还需 Windows Sandbox/VM 或另一台未装 .NET 的 x64 Windows 离线启动、完整向导、真实新旧版本升级及卸载保留数据；真实多 DPI、高对比度和服务器互通继续单列。

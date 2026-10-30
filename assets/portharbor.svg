@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">PortHarbor</title>
+  <desc id="desc">A white harbor enclosing a cyan terminal prompt on a blue rounded square.</desc>
+  <defs>
+    <linearGradient id="background" x1="16" y1="16" x2="240" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#153C78"/>
+      <stop offset="1" stop-color="#246BDD"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#background)"/>
+  <path d="M 62 64 L 62 156 C 62 183 83 202 110 202 L 146 202 C 173 202 194 183 194 156 L 194 64"
+        fill="none" stroke="#FFFFFF" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 96 83 L 126 110 L 96 137 M 146 139 L 167 139"
+        fill="none" stroke="#75E8F3" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

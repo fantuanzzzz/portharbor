@@ -27,6 +27,7 @@ MinVersion=10.0.17763
 OutputDir={#BuildOutput}
 OutputBaseFilename={#OutputName}
 WizardStyle=modern
+SetupIconFile=..\assets\portharbor.ico
 Compression=lzma2/fast
 SolidCompression=yes
 SetupLogging=yes

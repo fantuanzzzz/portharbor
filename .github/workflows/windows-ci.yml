@@ -75,6 +75,8 @@ jobs:
           ./scripts/Check-CodeStyle.ps1 -BaseRevision $base
       - name: Publication rollback fault injection
         run: .\tests\build-rollback.ps1 -OutputDirectory artifacts\rollback-validation
+      - name: Shortcut target inspection regression
+        run: .\tests\shortcut-inspection.ps1 -OutputDirectory artifacts\shortcut-validation
       - name: Build Release
         run: dotnet build tests/PortHarbor.Checks/PortHarbor.Checks.csproj -c Release --no-restore
       - name: Fast core checks
@@ -119,6 +121,7 @@ jobs:
             artifacts/*-results.json
             artifacts/standard/**/*.trx
             artifacts/standard/**/coverage.cobertura.xml
+            artifacts/shortcut-validation/**/shortcut-results.json
             ${{ runner.temp }}/portharbor-ui.png
             ${{ runner.temp }}/portharbor-ui-terminal.txt
           if-no-files-found: ignore
@@ -138,6 +141,13 @@ jobs:
       - name: Build and validate isolated distribution
         shell: pwsh
         run: ./build.ps1 -P10
+      - name: Summarize distribution validation failure
+        if: failure()
+        shell: pwsh
+        run: |
+          Get-ChildItem artifacts/distribution-validation -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -in @('distribution-results.json', 'shortcut-details.json') } |
+            ForEach-Object { Write-Host $_.Name; Get-Content -LiteralPath $_.FullName -Raw }
       - name: Upload distribution evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -146,4 +156,6 @@ jobs:
           path: |
             artifacts/releases/release-manifest.json
             artifacts/distribution-validation/**/distribution-results.json
+            artifacts/distribution-validation/**/shortcut-details.json
+            artifacts/distribution-validation/**/*.log
           if-no-files-found: ignore

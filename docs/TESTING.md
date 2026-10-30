@@ -47,6 +47,7 @@ dotnet test tests/PortHarbor.UnitTests/PortHarbor.UnitTests.csproj -c Release --
 | Checks `--ui-shell` | 真实 ConPTY 嵌入 UI；终端输出证据 |
 | `build.ps1 -ExtendedBaseline` | 标准测试 + 旧分层检查 + 协议/UI/ConPTY + 历史目录包冒烟 |
 | `build.ps1 -P10` | 单文件便携及隔离 AppId 安装/模拟升级/卸载；发行 JSON、manifest |
+| `tests/shortcut-inspection.ps1` | Unicode Shell 快捷方式读取、文件身份、别名/错误/缺失目标及参数专项；JSON |
 
 `TypedConfigurationChecks` 同时使用 `Store.Json` 和 INI 存储实现；凭据、格式/fixture、厂商异常分类、SSH 认证策略和平台生命周期属于存储/适配器回归，留在 Windows 检查器。Shared 的 MemoryRemoteFileSystem 和 ScriptedTerminalTransport 为测试替身，不是独立测试组。
 
@@ -64,3 +65,5 @@ pwsh -File scripts/Check-CodeStyle.ps1 -Fix
 格式门禁对相对 HEAD 的已改/新增 C# 文件执行 `dotnet format whitespace --verify-no-changes`；CI 对 PR base / push 前提交的变更文件执行。已提交后本地可传 `-BaseRevision HEAD^` 验证本次提交。需要先恢复所有项目（标准测试、Application.Checks、Checks 的恢复覆盖依赖图）；不批量重排未修改的历史代码。编译器及启用的分析器则检查整个项目。
 
 CI 在 Linux/macOS 的 core matrix 仅恢复/构建/执行 net8.0 纯核心测试；Windows validate 上传标准 TRX/Cobertura 和旧 JSON/UI 证据。两类通过后独立 distribution job 获取验签的 Inno Setup 并运行 P10。工作流更新不等于 GitHub 已实际运行通过；首次推送后应查看 core 的两个平台、validate 和 distribution。没有将 WinForms/串口/RDP 放到非 Windows runner，也不表示产品支持非 Windows UI。真实环境项目及记录格式见[实机验收手册](REAL-ENVIRONMENT-ACCEPTANCE.md)。
+
+发行快捷方式校验通过 `IShellLinkW` 读取 Unicode 目标，再用已打开文件的卷标识和文件 ID 判断是否确为安装的 EXE，不把路径字符串相等或文件内容相同当作同一个文件。仅读取，不解析启动或执行 `.lnk`。失败时控制台输出期望目标、实际目标、参数与文件身份比较结果；`shortcut-details.json` 与安装/升级/卸载测试日志作为 distribution-evidence 上传。原 GitHub #9/#10 的错误日志未记录实际目标，具体路径差异仍需修复后的 runner 证据确认。

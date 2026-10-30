@@ -1,5 +1,7 @@
 # PortHarbor
 
+<img src="assets/portharbor.svg" width="88" height="88" alt="PortHarbor 图标">
+
 **一个轻量、原生的 Windows 多协议连接工作台。**
 
 在同一个窗口管理 SSH、Telnet、本地 Shell、串口、FTP/SFTP 和远程桌面入口，提供会话分类、多标签终端与文件传输队列。

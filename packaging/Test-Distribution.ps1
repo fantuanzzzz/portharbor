@@ -22,6 +22,9 @@ $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PH.Check.${Tes
 $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) "PortHarbor Packaging Check $TestId\PortHarbor.lnk"
 $checks = [Collections.Generic.List[string]]::new()
 $failure = $null
+if (-not ('PortHarbor.BuildTools.ShortcutInspection' -as [type])) {
+    Add-Type -Path (Join-Path $PSScriptRoot 'ShortcutInspection.cs')
+}
 
 function Assert([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw "FAIL: $Message" }
@@ -65,11 +68,18 @@ try {
     $registration = Get-ItemProperty -LiteralPath $key
     Assert ($registration.InstallLocation.TrimEnd('\') -eq $installed -and $registration.DisplayVersion -eq $InstallVersion) 'Installer registers only the isolated per-user uninstall identity'
     Assert (Test-Path -LiteralPath $shortcut) 'Installer creates a Start Menu shortcut'
-    $shell = New-Object -ComObject WScript.Shell
-    try {
-        $link = $shell.CreateShortcut($shortcut)
-        Assert ($link.TargetPath -eq (Join-Path $installed 'PortHarbor.exe')) 'Start Menu shortcut targets the installed executable'
-    } finally { [Runtime.InteropServices.Marshal]::ReleaseComObject($shell) | Out-Null }
+    $expectedTarget = Join-Path $installed 'PortHarbor.exe'
+    $details = [PortHarbor.BuildTools.ShortcutInspection]::Read($shortcut)
+    $shortcutEvidence = [ordered]@{
+        ExpectedTarget = $expectedTarget; ActualTarget = $details.TargetPath
+        Arguments = $details.Arguments; WorkingDirectory = $details.WorkingDirectory
+        SameFile = $false; InspectionFailure = $null
+    }
+    try { $shortcutEvidence.SameFile = [PortHarbor.BuildTools.ShortcutInspection]::TargetsFile($details.TargetPath, $expectedTarget) }
+    catch { $shortcutEvidence.InspectionFailure = $_.Exception.Message }
+    $shortcutEvidence | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $reportRoot 'shortcut-details.json') -Encoding UTF8
+    Write-Host ('Shortcut inspection: ' + ($shortcutEvidence | ConvertTo-Json -Compress))
+    Assert ($shortcutEvidence.SameFile -and [string]::IsNullOrEmpty($details.Arguments)) 'Start Menu shortcut targets the installed executable'
     Run (Join-Path $installed 'PortHarbor.exe') @('--smoke', '--data-dir', ('"{0}"' -f $data))
     Assert (-not (Test-Path -LiteralPath (Join-Path $installed 'PortHarbor.ini')) -and -not (Test-Path -LiteralPath (Join-Path $data 'PortHarbor.ini'))) 'Installed single-file startup keeps program and portable data separate'
     $sentinel = Join-Path $data 'settings.json'
