@@ -16,6 +16,8 @@ internal static class Program
                 .GetCustomAttributes<System.Reflection.AssemblyMetadataAttribute>(typeof(Program).Assembly)
                 .Any(a => a.Key == "PortHarbor.PortableDefault" && a.Value == "true");
             var paths = WindowsAppDataPaths.Resolve(args, defaultPortable: portableDefault);
+            using var lease = ConfigurationDirectoryLease.Acquire(paths.ConfigurationDirectory);
+            WindowsRemoteDesktopLauncher.CleanupAbandonedConfigurations(paths.TemporaryDirectory);
             using var store = new Store(new WindowsSecretProtector(), paths);
             if (smoke)
             {

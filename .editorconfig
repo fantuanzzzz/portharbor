@@ -1,0 +1,18 @@
+root = true
+
+[*]
+charset = utf-8
+indent_style = space
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.cs]
+indent_size = 4
+csharp_new_line_before_open_brace = all
+csharp_preserve_single_line_blocks = true
+csharp_preserve_single_line_statements = true
+dotnet_diagnostic.CA2200.severity = warning
+dotnet_diagnostic.CA2012.severity = warning
+
+[*.{csproj,props,targets,yml,yaml}]
+indent_size = 2

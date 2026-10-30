@@ -4,7 +4,9 @@ param(
     [Parameter(Mandatory)][string]$Installer,
     [Parameter(Mandatory)][string]$UpgradeInstaller,
     [Parameter(Mandatory)][string]$TestId,
-    [Parameter(Mandatory)][string]$ReportDirectory
+    [Parameter(Mandatory)][string]$ReportDirectory,
+    [Parameter(Mandatory)][string]$InstallVersion,
+    [Parameter(Mandatory)][string]$UpgradeVersion
 )
 $ErrorActionPreference = 'Stop'
 if ($TestId -notmatch '^[a-f0-9]{32}$') { throw 'Installer test identity must be a 32-character random hexadecimal ID.' }
@@ -61,7 +63,7 @@ try {
     Run $Installer $installArguments
     Assert ((Test-Path -LiteralPath (Join-Path $installed 'PortHarbor.exe')) -and (Test-Path -LiteralPath (Join-Path $installed 'PortHarbor.installed'))) 'Installer deploys program and installed-mode marker'
     $registration = Get-ItemProperty -LiteralPath $key
-    Assert ($registration.InstallLocation.TrimEnd('\') -eq $installed -and $registration.DisplayVersion -eq '0.1.0') 'Installer registers only the isolated per-user uninstall identity'
+    Assert ($registration.InstallLocation.TrimEnd('\') -eq $installed -and $registration.DisplayVersion -eq $InstallVersion) 'Installer registers only the isolated per-user uninstall identity'
     Assert (Test-Path -LiteralPath $shortcut) 'Installer creates a Start Menu shortcut'
     $shell = New-Object -ComObject WScript.Shell
     try {
@@ -78,7 +80,7 @@ try {
     Set-Content -LiteralPath (Join-Path $installed 'INSTALL-NOTES.txt') -Value 'Old program file to be replaced during upgrade' -Encoding UTF8
     Run $UpgradeInstaller @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/LOG="{0}"' -f (Join-Path $reportRoot 'upgrade.log')))
     $upgraded = Get-ItemProperty -LiteralPath $key
-    Assert ($upgraded.DisplayVersion -eq '0.1.1' -and $upgraded.InstallLocation.TrimEnd('\') -eq $installed) 'Upgrade reuses the recorded install directory and updates its version'
+    Assert ($upgraded.DisplayVersion -eq $UpgradeVersion -and $upgraded.InstallLocation.TrimEnd('\') -eq $installed) 'Upgrade reuses the recorded install directory and updates its version'
     Assert ((Get-Content -LiteralPath (Join-Path $installed 'INSTALL-NOTES.txt') -Raw) -notmatch '^Old program file') 'Upgrade replaces the previous managed program files'
     Assert ((Get-DataHashes $data) -eq $dataHashes) 'Upgrade preserves user configuration and credentials'
     Run (Join-Path $installed 'PortHarbor.exe') @('--smoke', '--data-dir', ('"{0}"' -f $data))
@@ -94,6 +96,7 @@ finally {
         catch { Write-Warning "Test installation cleanup failed: $($_.Exception.Message)" }
     }
     if (-not $failure -and (Test-Path -LiteralPath $exe)) { Remove-Item -LiteralPath $exe -Force }
-    [pscustomobject]@{ Passed = $checks.Count; Failure = $failure; Checks = @($checks); TestId = $TestId; CleanWindowsVerified = $false } |
+    [pscustomobject]@{ Passed = $checks.Count; Failure = $failure; Checks = @($checks); TestId = $TestId;
+        InstallVersion = $InstallVersion; SimulatedUpgradeVersion = $UpgradeVersion; CleanWindowsVerified = $false } |
         ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $reportRoot 'distribution-results.json') -Encoding UTF8
 }

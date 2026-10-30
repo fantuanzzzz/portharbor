@@ -4,13 +4,26 @@ internal static class DiagnosticDialogs
 {
     internal static void Preview(IWin32Window owner, FileDiagnosticLog log, IFilePicker picker)
     {
+        var metadata = System.Reflection.CustomAttributeExtensions
+            .GetCustomAttributes<System.Reflection.AssemblyMetadataAttribute>(typeof(MainForm).Assembly)
+            .ToDictionary(attribute => attribute.Key, attribute => attribute.Value);
+        string? Read(string key) => metadata.GetValueOrDefault("PortHarbor." + key);
+        var build = new DiagnosticBuildIdentity(Read("SourceCommit"),
+            bool.TryParse(Read("SourceDirty"), out bool dirty) ? dirty : null, Read("SourceSnapshot"), Read("BuildSdk"));
         var preview = DiagnosticBundleService.Preview(typeof(MainForm).Assembly.GetName().Version?.ToString() ?? "unknown",
-            Environment.Version.ToString(), Environment.OSVersion.VersionString, log.Snapshot());
+            Environment.Version.ToString(), Environment.OSVersion.VersionString, log.Snapshot(), build);
         // Freeze and display the exact snapshot that the user will export.
         using var form = new Form { Text = "诊断包预览", Width = 850, Height = 650, StartPosition = FormStartPosition.CenterParent };
         UiTheme.AttachDialog(form);
-        var text = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false,
-            Dock = DockStyle.Fill, Text = DiagnosticBundleService.ToJson(preview) };
+        var text = new TextBox
+        {
+            Multiline = true,
+            ReadOnly = true,
+            ScrollBars = ScrollBars.Both,
+            WordWrap = false,
+            Dock = DockStyle.Fill,
+            Text = DiagnosticBundleService.ToJson(preview)
+        };
         var hint = new Label { Dock = DockStyle.Top, Height = 52, Text = "请核对以下内容后导出。仅含版本、平台、操作编号、错误码和计数；不含会话名称、端点、凭据、路径或终端内容。\n导出文件由你自行保管或分享。" };
         var save = new UiButton { Text = "导出以上内容…", Dock = DockStyle.Bottom, Height = 36, Kind = UiButtonKind.Primary };
         save.Click += (_, _) =>

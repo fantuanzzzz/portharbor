@@ -44,4 +44,4 @@ ConPTY 持有进程退出观察任务，释放时先终止本机子进程/释放
 
 协议回环检查验证 SSH 认证、主机指纹、PTY、输入和断开，Telnet 协商与远端断开，以及 SSH 服务不发握手 banner、Telnet 服务不发数据时的取消。`NetworkFailureChecks.cs` 另行对照 SSH 正常 Shell 退出/连接突然断开、Telnet 正常 EOF/TCP reset，并验证 SSH、Telnet、FTP、SFTP 连接被拒绝的诊断及清理。TCP reset 直接以零 linger 关闭服务端 socket，避免 TcpClient.Dispose 的正常关闭掩盖重置；这些用例均只访问 loopback。
 
-ConPTY 检查验证本地 Shell 输入、输出、resize、正常退出及关闭空闲进程。平台检查核验分层依赖、协议工厂拒绝、预取消和编辑器设备/选项注入；串口实机互通仍待验收。运行命令见 [README](../README.md#验证)。
+ConPTY 检查验证本地 Shell 输入、输出、resize、正常退出及关闭空闲进程。平台检查核验分层依赖、协议工厂拒绝、预取消和编辑器设备/选项注入；串口实机互通仍待验收。运行命令见[测试说明](TESTING.md)。

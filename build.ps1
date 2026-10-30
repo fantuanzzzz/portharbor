@@ -10,7 +10,7 @@ $env:NUGET_PACKAGES = Join-Path $PSScriptRoot '.packages'
 $env:APPDATA = Join-Path $PSScriptRoot '.build-home\AppData'
 New-Item -ItemType Directory -Force $env:APPDATA | Out-Null
 
-$version = '0.1.0'
+$version = ([xml](Get-Content -LiteralPath (Join-Path $PSScriptRoot 'src\PortHarbor\PortHarbor.csproj') -Raw)).Project.PropertyGroup.Version
 $rid = 'win-x64'
 $project = Join-Path $PSScriptRoot 'src\PortHarbor\PortHarbor.csproj'
 $checks = Join-Path $PSScriptRoot 'tests\PortHarbor.Checks\PortHarbor.Checks.csproj'
@@ -125,6 +125,11 @@ function Invoke-ExtendedChecks {
 try {
     New-Item -ItemType Directory -Force $artifacts, $stagePortable, $stageFramework | Out-Null
     Invoke-TimedStep 'diff-check' { & git diff --check }
+    $standardTests = Join-Path $PSScriptRoot 'tests\PortHarbor.UnitTests\PortHarbor.UnitTests.csproj'
+    $standardRestore = @('restore', $standardTests, '--configfile', $config, '--locked-mode')
+    if ($PackageSource) { $standardRestore += @('--source', $PackageSource) }
+    Invoke-TimedStep 'standard-restore' { & $Dotnet @standardRestore }
+    Invoke-TimedStep 'standard-tests' { & $Dotnet test $standardTests -c Release --no-restore --logger 'trx;LogFileName=core.trx' --results-directory (Join-Path $artifacts 'standard') --collect 'XPlat Code Coverage' --settings (Join-Path $PSScriptRoot 'tests\coverage.runsettings') }
     $applicationRestoreArgs = @('restore', $applicationChecks, '--configfile', $config, '--locked-mode')
     if ($PackageSource) { $applicationRestoreArgs += @('--source', $PackageSource) }
     Invoke-TimedStep 'application-restore' { & $Dotnet @applicationRestoreArgs }
@@ -133,6 +138,7 @@ try {
     $restoreArgs = @('restore', $checks, '--runtime', $rid, '--configfile', $config, '--locked-mode')
     if ($PackageSource) { $restoreArgs += @('--source', $PackageSource) }
     Invoke-TimedStep 'windows-restore' { & $Dotnet @restoreArgs }
+    & (Join-Path $PSScriptRoot 'scripts\Check-CodeStyle.ps1') -Dotnet $Dotnet
     Invoke-TimedStep 'windows-build' { & $Dotnet build $checks -c Release --no-restore }
     foreach ($suite in @('--unit', '--windows')) {
         $suiteName = $suite.TrimStart('-')
@@ -141,7 +147,10 @@ try {
     if ($ExtendedBaseline) { Invoke-ExtendedChecks }
 
     $runtimeMode = if ($IncludeRuntime) { 'true' } else { 'false' }
-    Invoke-TimedStep 'publish' { & $Dotnet publish $project -c Release --no-restore -r $rid --self-contained $runtimeMode -o $stageFramework }
+    $identity = & (Join-Path $PSScriptRoot 'scripts\Get-BuildIdentity.ps1') -Dotnet $Dotnet
+    $identityArguments = @("-p:SourceRevisionId=$($identity.Commit)", "-p:PortHarborSourceDirty=$($identity.Dirty)",
+        "-p:PortHarborSourceSnapshot=$($identity.SourceSnapshotSha256)", "-p:PortHarborBuildSdk=$($identity.SdkVersion)")
+    Invoke-TimedStep 'publish' { & $Dotnet publish $project -c Release --no-restore -r $rid --self-contained $runtimeMode @identityArguments -o $stageFramework }
     $smokeData = Join-Path $staging 'smoke-data'
     New-Item -ItemType Directory -Force $smokeData | Out-Null
     Invoke-PublishedSmoke -Executable (Join-Path $stageFramework 'PortHarbor.exe') -StartupArguments @('--smoke', '--installed', '--data-dir', ('"{0}"' -f $smokeData)) -Mode 'installed-isolated'
@@ -153,11 +162,11 @@ try {
     Invoke-PublishedSmoke -Executable (Join-Path $stagePortable 'PortHarbor.exe') -StartupArguments @('--smoke') -Mode 'portable-default-restart'
     $smokeResults | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $artifacts 'startup-smoke-results.json') -Encoding UTF8
     # Only remove the empty smoke configuration from this build's private staging directory.
-    foreach ($smokeFile in @($portableIni, "$portableIni.bak", "$portableIni.tmp")) {
+    foreach ($smokeFile in @($portableIni, "$portableIni.bak", "$portableIni.tmp", (Join-Path $stagePortable '.portharbor.lock'))) {
         if (Test-Path -LiteralPath $smokeFile) { Remove-Item -LiteralPath $smokeFile -Force }
     }
 
-    $docs = @('README.md', 'THIRD-PARTY-NOTICES.md') | ForEach-Object { Join-Path $PSScriptRoot $_ }
+    $docs = @('README.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md') | ForEach-Object { Join-Path $PSScriptRoot $_ }
     $destinations = @($stageFramework, $stagePortable)
     foreach ($destination in $destinations) {
         Copy-Item -LiteralPath $docs -Destination $destination -Force
@@ -179,6 +188,9 @@ try {
         SchemaVersion = 1
         GeneratedAt = [DateTimeOffset]::Now
         SdkVersion = $sdkVersion
+        Build = $identity
+        RuntimePacks = @(& (Join-Path $PSScriptRoot 'scripts\Get-PublishedRuntime.ps1') -AssetsFile (Join-Path $PSScriptRoot 'src\PortHarbor\obj\project.assets.json'))
+        StandardTests = [pscustomobject]@{ Report = 'standard/core.trx'; Coverage = 'standard/*/coverage.cobertura.xml'; Scope = 'Domain/Application only' }
         Configuration = if ($IncludeRuntime) { 'Release self-contained win-x64' } else { 'Release framework-dependent win-x64' }
         ExtendedBaseline = [bool]$ExtendedBaseline
         Steps = @($timings)
@@ -188,7 +200,7 @@ try {
             Measurement = 'check-count, not source-code coverage'
             Included = @('Application checks', 'core Windows checks', 'published installed/portable startup smoke')
             SeparateEntrypoints = if ($ExtendedBaseline) { @('none; all available automated Windows entries included') } else { @('protocol loopback integration', 'WinForms UI rendering', 'ConPTY UI shell (enable with -ExtendedBaseline)') }
-            NotMeasured = @('line/branch coverage', 'real serial devices', 'real RDP login', 'FTPS and production-server interoperability')
+            NotMeasured = @('Windows/UI/adapter source coverage', 'real serial devices', 'real RDP login', 'FTPS and production-server interoperability')
         }
     } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $artifacts 'engineering-baseline.json') -Encoding UTF8
 
@@ -198,7 +210,7 @@ try {
     if ($SimulateFailureAfterInstall) { $publishArgs.FailAfterInstallCount = $publishTargets.Count }
     & $publish @publishArgs
     Write-Host "Portable: $portableZip"
-    Write-Host "Installed layout (installer pending): $frameworkZip"
+    Write-Host "Installed-layout ZIP (installation wizard: build.ps1 -P10): $frameworkZip"
 }
 catch { throw }
 finally {

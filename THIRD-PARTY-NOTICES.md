@@ -1,6 +1,8 @@
 # Third-party notices
 
-This file and the `licenses/` directory contain notices for third-party dependencies only. They do not grant a license to PortHarbor's own code. The dependencies retain their own copyrights and licenses; applicable license texts are included in `licenses/` and must accompany redistribution of those dependencies.
+PortHarbor's own code and project documentation are licensed under the MIT License in the repository-root `LICENSE` file. Copyright (c) 2026 fantuanzzzz.
+
+This file and the `licenses/` directory contain notices for third-party dependencies only. Those dependencies retain their own copyrights and licenses; PortHarbor's MIT License does not replace their terms. Applicable license texts are included in `licenses/` and must accompany redistribution of those dependencies.
 
 | Package | Version | License | Upstream |
 | --- | --- | --- | --- |
@@ -20,3 +22,5 @@ Installation wizards are generated with Inno Setup 6.7.4 by Jordan Russell and M
 License texts were extracted from the exact NuGet packages except SSH.NET, whose MIT license was retrieved from the upstream 2026.0.0 tag. Microsoft package third-party notices are also included. The complete dependency graph and integrity hashes are in `src/PortHarbor/packages.lock.json`.
 
 Python paramiko, pyftpdlib and their dependencies are used solely for optional loopback tests. They are not included in the application or source archives as installed libraries. See each project's license when installing those tools separately.
+
+NUnit 4.4.0, NUnit3TestAdapter 5.0.0, Microsoft.NET.Test.Sdk 18.6.0 and coverlet.collector 6.0.4 are development-only test dependencies, restored from NuGet under their respective licenses (MIT). They and their transitive dependencies are not included in the application distribution. Their exact dependency graph and integrity hashes are recorded in `tests/PortHarbor.UnitTests/packages.lock.json`; package license texts are retained in the restored NuGet packages.

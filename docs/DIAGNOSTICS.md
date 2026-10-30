@@ -49,6 +49,8 @@ Application 的 `IDiagnosticLog` 定义允许字段，Infrastructure 的 `FileDi
 
 帮助菜单“预览并导出诊断包…”生成固定 JSON 快照，包含 schema、版本、运行时、平台和最多 500 条安全事件。仅导出用户已看到的内容，经文件选择端口保存；取消选择保留预览且不写文件。快照重新解析允许字段，不复制原日志行、设置或其他文件。不自动上传，分享由用户自行决定。
 
+2026-10-30 诊断包升级为 schema 2，增加 `Build`：提交 SHA、Dirty、源码摘要 SHA-256 和 SDK 版本，未提供的值为 null。提交和摘要只允许十六进制长度范围，SDK 仅允许可解析版本号；预览与导出边界都重新验证，不接受任意路径或原始文本。JSONL 事件字段与已有日志 schema 不变。发行 manifest 另包含 runtime pack 和依赖锁摘要，见[发行说明](DISTRIBUTION.md)。
+
 后台任务由 `BackgroundTask.Observe` 消费故障；已发布的连接错误保留原分类，未发布错误的任务提供安全 Unknown 兜底。清理错误不能覆盖原始操作失败。
 
 ## 验证入口

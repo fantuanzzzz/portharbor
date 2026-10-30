@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 
 namespace PortHarbor;
 
@@ -77,7 +77,7 @@ public sealed partial class MainForm : Form
             string.Join("\n\n", Enum.GetValues<PlatformCapability>().Select(c => PlatformCapabilityPresenter.Describe(c, this.capabilities.Get(c))))
                 + "\n\n运行支持可用不代表设备可访问或远程登录成功。", "平台能力", MessageBoxButtons.OK, MessageBoxIcon.Information));
         Item(help, "第三方许可…", () => { using var dialog = new ThirdPartyLicensesDialog(); dialog.ShowDialog(this); });
-        Item(help, "关于 PortHarbor", () => MessageBox.Show(this, "PortHarbor 0.1.0 私有预览版\nSSH · Telnet · RDP · FTP · SFTP · Serial · Shell\n第三方许可见“帮助 → 第三方许可”。", "关于 PortHarbor"));
+        Item(help, "关于 PortHarbor", () => MessageBox.Show(this, "PortHarbor 0.2.0 预览版 · MIT License\nCopyright (c) 2026 fantuanzzzz\nSSH · Telnet · RDP · FTP · SFTP · Serial · Shell\n项目及第三方许可见“帮助 → 第三方许可”。", "关于 PortHarbor"));
         tree.ImageList = SessionTreeIcons.Create(); tree.ShowPlusMinus = true; tree.ShowLines = true; tree.ShowRootLines = true; tree.ShowNodeToolTips = true;
         var split = workspaceSplit;
         var sidebar = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12), BackColor = tree.BackColor };
@@ -86,7 +86,7 @@ public sealed partial class MainForm : Form
         UiTheme.Role(sidebar, UiRole.Sidebar); UiTheme.Role(hint, UiRole.Muted); UiTheme.Role(title, UiRole.Heading);
         sidebar.Controls.Add(tree); sidebar.Controls.Add(libraryNotice); sidebar.Controls.Add(CreateLibrarySearch()); sidebar.Controls.Add(libraryFilters); sidebar.Controls.Add(title); sidebar.Controls.Add(hint);
         split.Panel1.Controls.Add(sidebar); split.Panel2.Controls.Add(tabs);
-        var bar = new StatusStrip(); bar.Items.Add(status); bar.Items.Add(new ToolStripStatusLabel("私有预览版 · 0.1.0"));
+        var bar = new StatusStrip(); bar.Items.Add(status); bar.Items.Add(new ToolStripStatusLabel("预览版 · 0.2.0"));
         Controls.Add(split); Controls.Add(CreateWorkspaceActions()); Controls.Add(toolbar); Controls.Add(bar);
         InitializeWorkspace();
         InitializeSessionLibrary();

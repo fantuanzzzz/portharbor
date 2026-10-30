@@ -1,6 +1,7 @@
-PortHarbor 0.1.0 - private preview
+PortHarbor 0.2.0 - preview / MIT License
 
-PortHarbor 0.1.0 私有预览版
+PortHarbor 0.2.0 预览版
+Copyright (c) 2026 fantuanzzzz
 
 自带 .NET 8 桌面运行时，不需要单独安装 .NET 或管理员权限。
 程序默认放在 %LOCALAPPDATA%\Programs\PortHarbor，可选择其他目录。
@@ -8,7 +9,8 @@ PortHarbor 0.1.0 私有预览版
 请勿安装到便携副本或用户数据目录。本安装器不会导入或移动便携数据。
 升级前先退出 PortHarbor，再运行新安装器覆盖原目录。
 在 Windows 设置 → 应用中卸载；卸载保留会话、凭据、偏好和日志。
-第三方许可已嵌入程序，可在“帮助 → 第三方许可”查看。
+PortHarbor 采用 MIT License 开源；项目及第三方许可已嵌入程序，
+可在“帮助 → 第三方许可”查看。
 
 --- English ---
 
@@ -25,4 +27,6 @@ Uninstall preserves sessions, credentials, preferences, logs and unrecognized fi
 The installer does not import or move existing portable data.
 
 Third-party notices are embedded in PortHarbor: Help > Third-party licenses.
-PortHarbor itself has not been released under an open-source license.
+PortHarbor is open source under the MIT License.
+Copyright (c) 2026 fantuanzzzz.
+The project MIT License is included in the embedded license viewer.

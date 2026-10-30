@@ -5,6 +5,9 @@ artifacts/
 .build-home/
 .packages/
 
+# Local historical documents and publication preparation backups
+/local-archive/
+
 # IDE and editor state
 .vs/
 .idea/
@@ -18,6 +21,24 @@ settings.json*
 test-results.json
 TestResults/
 *.log
+
+# Runtime data accidentally created beside the source checkout
+/PortHarbor*.exe
+/PortHarbor.ini*
+/PortHarbor.portable
+/PortHarbor.installed
+/.portharbor.lock
+/terminal-preferences.json*
+/workspace-layout.json*
+/session-activity.json*
+/logs/
+/rdp-temporary/
+
+# Local secrets (do not exclude source-controlled synthetic fixtures)
+.env
+.env.*
+!.env.example
+!.env.sample
 
 # Python test caches and coverage output
 __pycache__/

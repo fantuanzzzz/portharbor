@@ -7,16 +7,23 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <AssemblyName>PortHarbor</AssemblyName>
     <Product>PortHarbor</Product>
+    <Copyright>Copyright (c) 2026 fantuanzzzz</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <Description>Lightweight Windows connection manager preview</Description>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <PortHarborPortableDefault Condition="'$(PublishSingleFile)' == 'true'">true</PortHarborPortableDefault>
   </PropertyGroup>
   <ItemGroup>
     <AssemblyMetadata Include="PortHarbor.PortableDefault" Value="$(PortHarborPortableDefault)" />
+    <AssemblyMetadata Include="PortHarbor.SourceCommit" Value="$(SourceRevisionId)" />
+    <AssemblyMetadata Include="PortHarbor.SourceDirty" Value="$(PortHarborSourceDirty)" />
+    <AssemblyMetadata Include="PortHarbor.SourceSnapshot" Value="$(PortHarborSourceSnapshot)" />
+    <AssemblyMetadata Include="PortHarbor.BuildSdk" Value="$(PortHarborBuildSdk)" />
     <EmbeddedResource Include="../../THIRD-PARTY-NOTICES.md" LogicalName="PortHarbor.Licenses.NOTICES.md" />
+    <EmbeddedResource Include="../../LICENSE" LogicalName="PortHarbor.Licenses.PROJECT-LICENSE.txt" />
     <EmbeddedResource Include="../../licenses/*" LogicalName="PortHarbor.Licenses.%(Filename)%(Extension)" />
     <ProjectReference Include="../PortHarbor.Infrastructure/PortHarbor.Infrastructure.csproj" />
     <ProjectReference Include="../PortHarbor.Application/PortHarbor.Application.csproj" />

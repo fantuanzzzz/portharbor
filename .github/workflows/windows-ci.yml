@@ -9,11 +9,37 @@ permissions:
   contents: read
 
 jobs:
+  core:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Restore pure core tests
+        run: dotnet restore tests/PortHarbor.UnitTests/PortHarbor.UnitTests.csproj --configfile NuGet.Config --locked-mode
+      - name: Run pure core tests
+        run: dotnet test tests/PortHarbor.UnitTests/PortHarbor.UnitTests.csproj -c Release --no-restore --logger "trx;LogFileName=core.trx" --results-directory artifacts/standard --collect "XPlat Code Coverage" --settings tests/coverage.runsettings
+      - name: Upload core reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-${{ matrix.os }}-reports
+          path: artifacts/standard
+          if-no-files-found: ignore
+
   validate:
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
@@ -22,6 +48,10 @@ jobs:
           python-version: 3.12
       - name: Install loopback fixture dependencies
         run: python -m pip install -r tests/requirements.txt
+      - name: Restore standard tests
+        run: dotnet restore tests/PortHarbor.UnitTests/PortHarbor.UnitTests.csproj --configfile NuGet.Config --locked-mode
+      - name: Standard core tests and coverage
+        run: dotnet test tests/PortHarbor.UnitTests/PortHarbor.UnitTests.csproj -c Release --no-restore --logger "trx;LogFileName=core.trx" --results-directory artifacts/standard --collect "XPlat Code Coverage" --settings tests/coverage.runsettings
       - name: Restore application checks
         run: dotnet restore tests/PortHarbor.Application.Checks/PortHarbor.Application.Checks.csproj --configfile NuGet.Config --locked-mode
       - name: Build application checks
@@ -32,6 +62,17 @@ jobs:
         run: dotnet restore tests/PortHarbor.Checks/PortHarbor.Checks.csproj --runtime win-x64 --configfile NuGet.Config --locked-mode
       - name: Check diff whitespace
         run: git diff --check
+      - name: Check changed C# formatting
+        shell: pwsh
+        env:
+          STYLE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          $base = $env:STYLE_BASE
+          if (-not $base -or $base -match '^0+$') {
+            git rev-parse --verify 'HEAD^' 2>$null
+            $base = if ($LASTEXITCODE -eq 0) { 'HEAD^' } else { '4b825dc642cb6eb9a060e54bf8d69288fbee4904' }
+          }
+          ./scripts/Check-CodeStyle.ps1 -BaseRevision $base
       - name: Publication rollback fault injection
         run: .\tests\build-rollback.ps1 -OutputDirectory artifacts\rollback-validation
       - name: Build Release
@@ -76,6 +117,33 @@ jobs:
           name: windows-ci-reports
           path: |
             artifacts/*-results.json
+            artifacts/standard/**/*.trx
+            artifacts/standard/**/coverage.cobertura.xml
             ${{ runner.temp }}/portharbor-ui.png
             ${{ runner.temp }}/portharbor-ui-terminal.txt
+          if-no-files-found: ignore
+
+  distribution:
+    needs: [core, validate]
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Obtain verified Inno Setup compiler
+        shell: pwsh
+        run: ./packaging/Get-InnoSetup.ps1 -Download
+      - name: Build and validate isolated distribution
+        shell: pwsh
+        run: ./build.ps1 -P10
+      - name: Upload distribution evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: distribution-evidence
+          path: |
+            artifacts/releases/release-manifest.json
+            artifacts/distribution-validation/**/distribution-results.json
           if-no-files-found: ignore

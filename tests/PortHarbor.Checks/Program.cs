@@ -33,6 +33,21 @@ internal static partial class Program
     [STAThread]
     static async Task<int> Main(string[] args)
     {
+        if (args.Length == 2 && args[0] == "--lease-probe")
+        {
+            using var lease = ConfigurationDirectoryLease.Acquire(args[1]);
+            Console.WriteLine("READY");
+            Console.ReadLine();
+            return 0;
+        }
+        if (args.Length == 2 && args[0] == "--rdp-orphan-probe")
+        {
+            using var workspace = RdpTemporaryWorkspace.Create(args[1]);
+            File.WriteAllText(workspace.ConfigurationPath, "fixture");
+            Console.WriteLine("READY");
+            Console.ReadLine();
+            return 0;
+        }
         string root = Path.Combine(Path.GetTempPath(), "PortHarbor-check-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
         string? failure = null;
         try
@@ -79,10 +94,13 @@ internal static partial class Program
                 WindowsCapabilityDetection();
                 WindowsPathResolution(root);
                 FilePickerAdapters(root);
+                await ConfigurationLeaseChecks(root);
+                await RdpOrphanChecks(root);
             }
             else if (args.Contains("--windows"))
             {
                 await Shell(root); await Lifecycle(root); await ShellPlatformCancellation(root); await WindowsServices(root); WindowsCapabilityRuntime();
+                await ApplicationLeaseStartupChecks(root);
             }
             else if (configPath != null)
             {
@@ -129,16 +147,16 @@ internal static partial class Program
     static async Task Ui(string root, string output)
     {
         InitializeUi();
-        using var uiStore = new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root,"ui"), false));
+        using var uiStore = new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root, "ui"), false));
         uiStore.AddGroup("空分类");
         uiStore.AddGroup("Work/Switches/Core");
         uiStore.PutSession(new Session { Name = "Nested terminal", Host = "nested-test-host", Group = "Work/Switches/Core" }, "");
         using var form = new MainForm(uiStore);
         form.Show(); Application.DoEvents();
-        using var bitmap = new System.Drawing.Bitmap(form.Width,form.Height); form.DrawToBitmap(bitmap,form.ClientRectangle); bitmap.Save(output);
-        Check(form.Visible && form.Controls.Count>0,"main window renders without error");
-        foreach(var p in Enum.GetValues<Protocol>()) { using var editor = new SessionEditor(new Session { Protocol=p,Port=Session.DefaultPort(p) }); editor.Show(); Application.DoEvents(); editor.Close(); }
-        Check(true,"all seven protocol editors open without error");
+        using var bitmap = new System.Drawing.Bitmap(form.Width, form.Height); form.DrawToBitmap(bitmap, form.ClientRectangle); bitmap.Save(output);
+        Check(form.Visible && form.Controls.Count > 0, "main window renders without error");
+        foreach (var p in Enum.GetValues<Protocol>()) { using var editor = new SessionEditor(new Session { Protocol = p, Port = Session.DefaultPort(p) }); editor.Show(); Application.DoEvents(); editor.Close(); }
+        Check(true, "all seven protocol editors open without error");
         var tree = FindControl<TreeView>(form);
         Check(tree.Nodes.Cast<TreeNode>().Any(n => n.Text == "空分类" && n.Nodes.Count == 0), "sidebar renders saved empty category");
         var tabs = FindControl<TabControl>(form);
@@ -176,51 +194,51 @@ internal static partial class Program
         }
         throw new InvalidOperationException("Control not found: " + typeof(T).Name);
     }
-    static async Task SshRoundTrip(string root,string configPath)
+    static async Task SshRoundTrip(string root, string configPath)
     {
-        using var config=System.Text.Json.JsonDocument.Parse(File.ReadAllText(configPath));
-        var s=new Session { Protocol=Protocol.SSH,Host="127.0.0.1",Port=config.RootElement.GetProperty("sftpPort").GetInt32(),Username="easytest" };
-        using var connection=TerminalConnectionFactory.Create(s,new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root,"ssh-terminal"), false)),"easytest-only",_=>true);
-        var text=new StringBuilder(); var ready=new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously); var echoed=new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        connection.Output+=value=> { lock(text) { text.Append(value); if(text.ToString().Contains("SSH_TEST_READY")) ready.TrySetResult(true); if(text.ToString().Contains("ECHO:ordered-input")) echoed.TrySetResult(true); } };
-        Task run=connection.Run(80,24); await ready.Task.WaitAsync(TimeSpan.FromSeconds(10)); connection.Send(Encoding.UTF8.GetBytes("ordered-input")); await echoed.Task.WaitAsync(TimeSpan.FromSeconds(10)); connection.Resize(100,30); connection.Dispose(); await run.WaitAsync(TimeSpan.FromSeconds(10));
-        Check(true,"SSH live authentication, host key, PTY, ordered input and disconnect");
+        using var config = System.Text.Json.JsonDocument.Parse(File.ReadAllText(configPath));
+        var s = new Session { Protocol = Protocol.SSH, Host = "127.0.0.1", Port = config.RootElement.GetProperty("sftpPort").GetInt32(), Username = "easytest" };
+        using var connection = TerminalConnectionFactory.Create(s, new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root, "ssh-terminal"), false)), "easytest-only", _ => true);
+        var text = new StringBuilder(); var ready = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously); var echoed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        connection.Output += value => { lock (text) { text.Append(value); if (text.ToString().Contains("SSH_TEST_READY")) ready.TrySetResult(true); if (text.ToString().Contains("ECHO:ordered-input")) echoed.TrySetResult(true); } };
+        Task run = connection.Run(80, 24); await ready.Task.WaitAsync(TimeSpan.FromSeconds(10)); connection.Send(Encoding.UTF8.GetBytes("ordered-input")); await echoed.Task.WaitAsync(TimeSpan.FromSeconds(10)); connection.Resize(100, 30); connection.Dispose(); await run.WaitAsync(TimeSpan.FromSeconds(10));
+        Check(true, "SSH live authentication, host key, PTY, ordered input and disconnect");
     }
-    static async Task SshInteractiveRoundTrip(string root,string configPath)
+    static async Task SshInteractiveRoundTrip(string root, string configPath)
     {
-        using var config=System.Text.Json.JsonDocument.Parse(File.ReadAllText(configPath));
-        int port=config.RootElement.GetProperty("sftpPort").GetInt32();
-        var store=new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root,"ssh-interactive"), false));
-        var session=new Session { Protocol=Protocol.SSH,Host="127.0.0.1",Port=port,Username="keyboardtest" };
-        var received=new List<SshAuthenticationChallenge>();
+        using var config = System.Text.Json.JsonDocument.Parse(File.ReadAllText(configPath));
+        int port = config.RootElement.GetProperty("sftpPort").GetInt32();
+        var store = new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root, "ssh-interactive"), false));
+        var session = new Session { Protocol = Protocol.SSH, Host = "127.0.0.1", Port = port, Username = "keyboardtest" };
+        var received = new List<SshAuthenticationChallenge>();
         IReadOnlyList<string> Answer(SshAuthenticationChallenge challenge)
         {
             received.Add(challenge);
             return challenge.Prompts[0].Request.Contains("验证码", StringComparison.Ordinal) ? ["otp-123"] : ["device-yes"];
         }
-        using var connection=TerminalConnectionFactory.Create(session, store, "", _=>true, Answer);
-        var output=new StringBuilder(); var ready=new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        connection.Output += value => { lock(output) { output.Append(value); if(output.ToString().Contains("SSH_TEST_READY")) ready.TrySetResult(true); } };
-        var run=connection.Run(80,24); await ready.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        using var connection = TerminalConnectionFactory.Create(session, store, "", _ => true, Answer);
+        var output = new StringBuilder(); var ready = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        connection.Output += value => { lock (output) { output.Append(value); if (output.ToString().Contains("SSH_TEST_READY")) ready.TrySetResult(true); } };
+        var run = connection.Run(80, 24); await ready.Task.WaitAsync(TimeSpan.FromSeconds(10));
         connection.Dispose(); await run.WaitAsync(TimeSpan.FromSeconds(10));
         Check(received.Count == 2 && received[0].Instruction == "第一轮验证" && received[1].Instruction == "第二轮验证"
             && connection.State == ConnectionState.Closed, "SSH keyboard-interactive completes two challenge rounds and closes cleanly");
 
-        var sftpSession=session with { Protocol=Protocol.SFTP };
-        await using var sftp=RemoteFileSystemFactory.Create(sftpSession, store, "", _=>true, Answer);
-        await sftp.ConnectAsync(_=>{}, CancellationToken.None);
-        var listing=await sftp.ListAsync("/", CancellationToken.None);
+        var sftpSession = session with { Protocol = Protocol.SFTP };
+        await using var sftp = RemoteFileSystemFactory.Create(sftpSession, store, "", _ => true, Answer);
+        await sftp.ConnectAsync(_ => { }, CancellationToken.None);
+        var listing = await sftp.ListAsync("/", CancellationToken.None);
         Check(received.Count == 4 && listing.Count >= 0, "SFTP reuses the same multi-round authentication handler");
         await sftp.DisposeAsync();
 
-        var cancelledPrompts=0;
-        using var cancelled=TerminalConnectionFactory.Create(session with { Username="canceltest" }, store, "", _=>true, challenge => { cancelledPrompts++; return null; });
-        var cancelledRun=cancelled.Run(80,24); await cancelledRun.WaitAsync(TimeSpan.FromSeconds(10));
+        var cancelledPrompts = 0;
+        using var cancelled = TerminalConnectionFactory.Create(session with { Username = "canceltest" }, store, "", _ => true, challenge => { cancelledPrompts++; return null; });
+        var cancelledRun = cancelled.Run(80, 24); await cancelledRun.WaitAsync(TimeSpan.FromSeconds(10));
         Check(cancelledPrompts == 1 && cancelled.State == ConnectionState.Closed, "cancelling an interactive challenge releases the SSH connection");
 
-        var rejectedPrompts=0;
-        using var rejected=TerminalConnectionFactory.Create(session, store, "", _=>true, _ => { rejectedPrompts++; return ["incorrect-code"]; });
-        var failure=await CaptureFailure(rejected.Run(80,24).WaitAsync(TimeSpan.FromSeconds(10)));
+        var rejectedPrompts = 0;
+        using var rejected = TerminalConnectionFactory.Create(session, store, "", _ => true, _ => { rejectedPrompts++; return ["incorrect-code"]; });
+        var failure = await CaptureFailure(rejected.Run(80, 24).WaitAsync(TimeSpan.FromSeconds(10)));
         Check(rejectedPrompts == 1 && failure is Renci.SshNet.Common.SshAuthenticationException && rejected.State == ConnectionState.Closed,
             "incorrect keyboard-interactive response fails authentication and releases the SSH connection");
     }
@@ -252,58 +270,35 @@ internal static partial class Program
         string config = RdpLauncher.Configuration(rdp);
         Check(config.Contains("[::1]:3390") && !config.Contains("password") && config.Contains("authentication level:i:1"), "RDP file contains no password and keeps server authentication enabled");
     }
-    static void Terminal()
-    {
-        var t = new TerminalScreen(12, 4); t.Feed("abc\rZ"); Check(t.Lines[0][0].Text == "Z" && t.Lines[0][1].Text == "b", "carriage return overwrites cursor position");
-        t.Feed("\x1b[2;3H\x1b[31m红"); Check(t.Lines[1][2].Text == "红" && t.Lines[1][3].Text == "" && t.Lines[1][2].Foreground != TerminalScreen.DefaultForeground, "CJK uses two cells with ANSI color");
-        t.Feed("\x1b[2J\x1b[Hmain\x1b[?1049hALT\x1b[?1049l"); Check(t.Lines[0][0].Text == "m", "alternate buffer restores primary screen");
-        t.Feed("\x1b[3;1Hold\x1b[3;1H\x1b[Knew"); Check(string.Concat(t.Lines[2].Select(c => c.Text)).TrimEnd() == "new", "erase line clears stale content");
-        string? reply = null; t.Reply += s => reply = s; t.Feed("\x1b[6n"); Check(reply == "\x1b[3;4R", "terminal reports cursor position");
-        t.Feed("\x1b[38;2;10;20;30mX"); Check(t.Lines[2][3].Foreground == System.Drawing.Color.FromArgb(10,20,30), "truecolor SGR");
-        t.Feed("\x1b]0;invisible title\aQ"); Check(!t.Text.Contains("invisible title"), "OSC title does not leak into screen");
-        t.Resize(20, 8); Check(t.Columns == 20 && t.Rows == 8 && t.Lines[0][0].Text == "m", "resize preserves screen contents");
-        t.Feed("\x1b[?2004h\x1b[?1h"); Check(t.BracketedPaste && t.ApplicationCursor, "bracketed paste and application cursor modes");
-        t.Feed("\ud83d"); t.Feed("\ude00"); Check(t.Text.Contains("😀"), "split surrogate pair handled");
-        var random = new Random(42); for (int i = 0; i < 2000; i++) t.Feed($"\x1b[{random.Next(65535)};{random.Next(65535)}{new[]{'H','J','K','m','P','@','L','M','r'}[random.Next(9)]}");
-        Check(t.X < t.Columns && t.Y < t.Rows, "malformed and oversized ANSI parameters stay bounded");
-    }
-    static void Telnet()
-    {
-        var replies = new List<byte[]>(); var codec = new TelnetCodec(replies.Add);
-        Check(codec.Decode(new byte[] { 65,255,251 }).SequenceEqual(new byte[] {65}), "Telnet IAC fragmentation preserves text");
-        codec.Decode(new byte[] {1}); Check(replies.Single().SequenceEqual(new byte[] {255,253,1}), "Telnet negotiates echo across packet boundary");
-        codec.Decode(new byte[] {255,253,24,255,250,24,1,255}); codec.Decode(new byte[] {240});
-        Check(replies.Last().Contains((byte)'v'), "Telnet terminal type subnegotiation");
-        Check(codec.Decode(new byte[] {255,255,66}).SequenceEqual(new byte[] {255,66}), "Telnet escapes literal IAC");
-        Check(TelnetCodec.Encode([13,255]).SequenceEqual(new byte[] {13,0,255,255}), "Telnet NVT CR and outgoing IAC encoding");
-    }
+    static void Terminal() => TerminalModelChecks.Run(Check);
+    static void Telnet() => TelnetModelChecks.Run(Check);
     static async Task TelnetRoundTrip(string root)
     {
         var server = new TcpListener(IPAddress.Loopback, 0); server.Start(); int port = ((IPEndPoint)server.LocalEndpoint).Port;
         var text = new StringBuilder(); var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var session = new Session { Protocol = Protocol.Telnet, Host = "127.0.0.1", Port = port };
-        using var connection = TerminalConnectionFactory.Create(session, new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root,"telnet"), false)), "", _=>false);
+        using var connection = TerminalConnectionFactory.Create(session, new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root, "telnet"), false)), "", _ => false);
         connection.Output += s => { lock (text) { text.Append(s); if (text.ToString().Contains("hello中文")) done.TrySetResult(true); } };
-        Task run = connection.Run(80,24); using var peer = await server.AcceptTcpClientAsync(); var stream = peer.GetStream();
-        await stream.WriteAsync(new byte[] {255,251}); await stream.WriteAsync(new byte[] {1});
-        var bytes = Encoding.UTF8.GetBytes("hello中文"); foreach (var b in bytes) await stream.WriteAsync(new byte[]{b});
+        Task run = connection.Run(80, 24); using var peer = await server.AcceptTcpClientAsync(); var stream = peer.GetStream();
+        await stream.WriteAsync(new byte[] { 255, 251 }); await stream.WriteAsync(new byte[] { 1 });
+        var bytes = Encoding.UTF8.GetBytes("hello中文"); foreach (var b in bytes) await stream.WriteAsync(new byte[] { b });
         await done.Task.WaitAsync(TimeSpan.FromSeconds(8));
         connection.Send(Encoding.UTF8.GetBytes("xyz\r"));
         var received = new List<byte>(); var buf = new byte[100];
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
-        while (!Encoding.UTF8.GetString(received.ToArray()).Contains("xyz\r\0")) { int n = await stream.ReadAsync(buf,timeout.Token); received.AddRange(buf.Take(n)); }
-        Check(received.Take(3).SequenceEqual(new byte[]{255,253,1}), "live Telnet loopback negotiates and preserves ordered input");
+        while (!Encoding.UTF8.GetString(received.ToArray()).Contains("xyz\r\0")) { int n = await stream.ReadAsync(buf, timeout.Token); received.AddRange(buf.Take(n)); }
+        Check(received.Take(3).SequenceEqual(new byte[] { 255, 253, 1 }), "live Telnet loopback negotiates and preserves ordered input");
         peer.Dispose(); server.Stop(); await run.WaitAsync(TimeSpan.FromSeconds(8));
     }
     static async Task Shell(string root)
     {
         var s = new Session { Protocol = Protocol.Shell, Executable = "cmd.exe", Arguments = "/Q", WorkingDirectory = root };
-        using var connection = TerminalConnectionFactory.Create(s, new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root,"shell"), false)), "", _=>false);
+        using var connection = TerminalConnectionFactory.Create(s, new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root, "shell"), false)), "", _ => false);
         var text = new StringBuilder(); var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        connection.Output += value => { lock(text) { text.Append(value); if (text.ToString().Contains("CONPTY_OK")) done.TrySetResult(true); } };
-        var run = connection.Run(80,24);
+        connection.Output += value => { lock (text) { text.Append(value); if (text.ToString().Contains("CONPTY_OK")) done.TrySetResult(true); } };
+        var run = connection.Run(80, 24);
         connection.Send(Encoding.UTF8.GetBytes("echo CONPTY^_OK\r"));
-        await done.Task.WaitAsync(TimeSpan.FromSeconds(12)); connection.Resize(100,30);
+        await done.Task.WaitAsync(TimeSpan.FromSeconds(12)); connection.Resize(100, 30);
         connection.Send(Encoding.UTF8.GetBytes("exit\r")); await run.WaitAsync(TimeSpan.FromSeconds(12));
         Check(text.ToString().Contains("CONPTY_OK"), "real interactive ConPTY shell input/output/resize/exit");
     }
@@ -321,53 +316,53 @@ internal static partial class Program
 
     static async Task Lifecycle(string root)
     {
-        using var connection = TerminalConnectionFactory.Create(new Session { Protocol = Protocol.Shell, Executable="no-such-portharbor-program.exe" },new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root,"invalid-shell"), false)),"",_=>false);
+        using var connection = TerminalConnectionFactory.Create(new Session { Protocol = Protocol.Shell, Executable = "no-such-portharbor-program.exe" }, new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root, "invalid-shell"), false)), "", _ => false);
         var diagnostics = new List<ConnectionDiagnostic>(); connection.Diagnostic += diagnostics.Add;
-        bool failed=false; try { await connection.Run(80,24).WaitAsync(TimeSpan.FromSeconds(8)); } catch(System.ComponentModel.Win32Exception) { failed=true; }
-        Check(failed,"invalid executable fails cleanly without leaked startup state");
+        bool failed = false; try { await connection.Run(80, 24).WaitAsync(TimeSpan.FromSeconds(8)); } catch (System.ComponentModel.Win32Exception) { failed = true; }
+        Check(failed, "invalid executable fails cleanly without leaked startup state");
         Check(connection.OperationId != Guid.Empty && diagnostics.Any(d => d.State == ConnectionState.Failed && d.ErrorCode == ConnectionErrorCode.PlatformUnavailable) && connection.State == ConnectionState.Closed, "connection diagnostics report operation, stable error and closed state");
     }
     static async Task Integration(string root, string configPath)
     {
-        using var config=System.Text.Json.JsonDocument.Parse(File.ReadAllText(configPath)); var c=config.RootElement;
-        foreach (var protocol in new[]{Protocol.FTP,Protocol.SFTP})
+        using var config = System.Text.Json.JsonDocument.Parse(File.ReadAllText(configPath)); var c = config.RootElement;
+        foreach (var protocol in new[] { Protocol.FTP, Protocol.SFTP })
         {
-            var s=new Session { Protocol=protocol, Host="127.0.0.1", Port=c.GetProperty(protocol.ToString().ToLowerInvariant()+"Port").GetInt32(), Username="easytest" };
-            var store=new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root,protocol.ToString()), false));
-            await using IFileTransfer files=FileTransferFactory.Create(s,store,"easytest-only",_=>true);
+            var s = new Session { Protocol = protocol, Host = "127.0.0.1", Port = c.GetProperty(protocol.ToString().ToLowerInvariant() + "Port").GetInt32(), Username = "easytest" };
+            var store = new Store(new WindowsSecretProtector(), TestPaths(Path.Combine(root, protocol.ToString()), false));
+            await using IFileTransfer files = FileTransferFactory.Create(s, store, "easytest-only", _ => true);
             using var timeout = new CancellationTokenSource();
             await files.ConnectAsync(timeout.Token, TimeSpan.FromSeconds(15));
-            string local=Path.Combine(root,"upload-"+protocol+".txt"),download=local+".download"; File.WriteAllText(local,"文件传输 test \0\n"+new string('x',200000));
-            if (await files.ExistsAsync("/test-dir",timeout.Token,TimeSpan.FromSeconds(10))) { foreach(var old in await files.ListAsync("/test-dir",timeout.Token,TimeSpan.FromSeconds(10))) await files.DeleteAsync(old,timeout.Token,TimeSpan.FromSeconds(10)); await files.DeleteAsync(new("test-dir","/test-dir",true,0,DateTime.Now),timeout.Token,TimeSpan.FromSeconds(10)); }
-            await files.MkdirAsync("/test-dir",timeout.Token,TimeSpan.FromSeconds(10));
-            await files.UploadAsync(local,"/test-dir/中文.txt",timeout.Token,TimeSpan.FromSeconds(30));
-            Check((await files.ListAsync("/test-dir",timeout.Token,TimeSpan.FromSeconds(10))).Any(f=>f.Name=="中文.txt"),protocol+" lists uploaded Unicode filename");
-            Check(Throws<IOException>(() => files.DeleteAsync(new("test-dir","/test-dir",true,0,DateTime.Now),timeout.Token,TimeSpan.FromSeconds(10)).GetAwaiter().GetResult()) && await files.ExistsAsync("/test-dir/中文.txt",timeout.Token,TimeSpan.FromSeconds(10)), protocol+" refuses nonempty directory deletion");
-            await files.UploadAsync(local,"/test-dir/existing.txt",timeout.Token,TimeSpan.FromSeconds(30));
-            Check(Throws<IOException>(() => files.RenameAsync("/test-dir/中文.txt","/test-dir/existing.txt",timeout.Token,TimeSpan.FromSeconds(10)).GetAwaiter().GetResult()) && await files.ExistsAsync("/test-dir/中文.txt",timeout.Token,TimeSpan.FromSeconds(10)), protocol+" refuses rename over existing target");
-            await files.DeleteAsync(new("existing.txt","/test-dir/existing.txt",false,0,DateTime.Now),timeout.Token,TimeSpan.FromSeconds(10));
-            await files.DownloadAsync("/test-dir/中文.txt",download,timeout.Token,TimeSpan.FromSeconds(30));
-            Check(File.ReadAllBytes(local).SequenceEqual(File.ReadAllBytes(download)),protocol+" upload/download bytes round trip");
+            string local = Path.Combine(root, "upload-" + protocol + ".txt"), download = local + ".download"; File.WriteAllText(local, "文件传输 test \0\n" + new string('x', 200000));
+            if (await files.ExistsAsync("/test-dir", timeout.Token, TimeSpan.FromSeconds(10))) { foreach (var old in await files.ListAsync("/test-dir", timeout.Token, TimeSpan.FromSeconds(10))) await files.DeleteAsync(old, timeout.Token, TimeSpan.FromSeconds(10)); await files.DeleteAsync(new("test-dir", "/test-dir", true, 0, DateTime.Now), timeout.Token, TimeSpan.FromSeconds(10)); }
+            await files.MkdirAsync("/test-dir", timeout.Token, TimeSpan.FromSeconds(10));
+            await files.UploadAsync(local, "/test-dir/中文.txt", timeout.Token, TimeSpan.FromSeconds(30));
+            Check((await files.ListAsync("/test-dir", timeout.Token, TimeSpan.FromSeconds(10))).Any(f => f.Name == "中文.txt"), protocol + " lists uploaded Unicode filename");
+            Check(Throws<IOException>(() => files.DeleteAsync(new("test-dir", "/test-dir", true, 0, DateTime.Now), timeout.Token, TimeSpan.FromSeconds(10)).GetAwaiter().GetResult()) && await files.ExistsAsync("/test-dir/中文.txt", timeout.Token, TimeSpan.FromSeconds(10)), protocol + " refuses nonempty directory deletion");
+            await files.UploadAsync(local, "/test-dir/existing.txt", timeout.Token, TimeSpan.FromSeconds(30));
+            Check(Throws<IOException>(() => files.RenameAsync("/test-dir/中文.txt", "/test-dir/existing.txt", timeout.Token, TimeSpan.FromSeconds(10)).GetAwaiter().GetResult()) && await files.ExistsAsync("/test-dir/中文.txt", timeout.Token, TimeSpan.FromSeconds(10)), protocol + " refuses rename over existing target");
+            await files.DeleteAsync(new("existing.txt", "/test-dir/existing.txt", false, 0, DateTime.Now), timeout.Token, TimeSpan.FromSeconds(10));
+            await files.DownloadAsync("/test-dir/中文.txt", download, timeout.Token, TimeSpan.FromSeconds(30));
+            Check(File.ReadAllBytes(local).SequenceEqual(File.ReadAllBytes(download)), protocol + " upload/download bytes round trip");
             using (var stop = new CancellationTokenSource())
             {
-                await CheckThrowsAsync<OperationCanceledException>(() => files.UploadAsync(local,"/test-dir/中文.txt",stop.Token,TimeSpan.FromSeconds(30),new CallbackProgress<TransferProgress>(_=>stop.Cancel())))
+                await CheckThrowsAsync<OperationCanceledException>(() => files.UploadAsync(local, "/test-dir/中文.txt", stop.Token, TimeSpan.FromSeconds(30), new CallbackProgress<TransferProgress>(_ => stop.Cancel())))
                     .ConfigureAwait(false);
-                Check((await files.ListAsync("/test-dir",timeout.Token,TimeSpan.FromSeconds(10))).Count==1, protocol+" cancelled upload removes remote temporary file");
-                await files.DownloadAsync("/test-dir/中文.txt",download,timeout.Token,TimeSpan.FromSeconds(30));
-                Check(File.ReadAllBytes(local).SequenceEqual(File.ReadAllBytes(download)), protocol+" cancelled upload retains previous remote content");
+                Check((await files.ListAsync("/test-dir", timeout.Token, TimeSpan.FromSeconds(10))).Count == 1, protocol + " cancelled upload removes remote temporary file");
+                await files.DownloadAsync("/test-dir/中文.txt", download, timeout.Token, TimeSpan.FromSeconds(30));
+                Check(File.ReadAllBytes(local).SequenceEqual(File.ReadAllBytes(download)), protocol + " cancelled upload retains previous remote content");
             }
             using (var stop = new CancellationTokenSource())
             {
-                File.WriteAllText(download,"preserved local target");
-                await CheckThrowsAsync<OperationCanceledException>(() => files.DownloadAsync("/test-dir/中文.txt",download,stop.Token,TimeSpan.FromSeconds(30),new CallbackProgress<TransferProgress>(_=>stop.Cancel())))
+                File.WriteAllText(download, "preserved local target");
+                await CheckThrowsAsync<OperationCanceledException>(() => files.DownloadAsync("/test-dir/中文.txt", download, stop.Token, TimeSpan.FromSeconds(30), new CallbackProgress<TransferProgress>(_ => stop.Cancel())))
                     .ConfigureAwait(false);
-                Check(File.ReadAllText(download)=="preserved local target" && !Directory.EnumerateFiles(root,"*.part").Any(), protocol+" cancelled download preserves local target and removes temporary file");
+                Check(File.ReadAllText(download) == "preserved local target" && !Directory.EnumerateFiles(root, "*.part").Any(), protocol + " cancelled download preserves local target and removes temporary file");
             }
-            File.WriteAllText(local,"replacement"); await files.UploadAsync(local,"/test-dir/中文.txt",timeout.Token,TimeSpan.FromSeconds(30));
-            await files.DownloadAsync("/test-dir/中文.txt",download,timeout.Token,TimeSpan.FromSeconds(30)); Check(File.ReadAllText(download)=="replacement",protocol+" overwrite path");
-            await files.RenameAsync("/test-dir/中文.txt","/test-dir/renamed.txt",timeout.Token,TimeSpan.FromSeconds(10)); var file=(await files.ListAsync("/test-dir",timeout.Token,TimeSpan.FromSeconds(10))).Single();
-            await files.DeleteAsync(file,timeout.Token,TimeSpan.FromSeconds(10)); await files.DeleteAsync(new("test-dir","/test-dir",true,0,DateTime.Now),timeout.Token,TimeSpan.FromSeconds(10));
-            Check(!await files.ExistsAsync("/test-dir",timeout.Token,TimeSpan.FromSeconds(10)),protocol+" rename and delete empty directory");
+            File.WriteAllText(local, "replacement"); await files.UploadAsync(local, "/test-dir/中文.txt", timeout.Token, TimeSpan.FromSeconds(30));
+            await files.DownloadAsync("/test-dir/中文.txt", download, timeout.Token, TimeSpan.FromSeconds(30)); Check(File.ReadAllText(download) == "replacement", protocol + " overwrite path");
+            await files.RenameAsync("/test-dir/中文.txt", "/test-dir/renamed.txt", timeout.Token, TimeSpan.FromSeconds(10)); var file = (await files.ListAsync("/test-dir", timeout.Token, TimeSpan.FromSeconds(10))).Single();
+            await files.DeleteAsync(file, timeout.Token, TimeSpan.FromSeconds(10)); await files.DeleteAsync(new("test-dir", "/test-dir", true, 0, DateTime.Now), timeout.Token, TimeSpan.FromSeconds(10));
+            Check(!await files.ExistsAsync("/test-dir", timeout.Token, TimeSpan.FromSeconds(10)), protocol + " rename and delete empty directory");
         }
     }
 

@@ -1,6 +1,6 @@
 ; The test build has its own AppId and Start Menu group. Never smoke-test the shipping identity.
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "0.2.0"
 #endif
 #ifdef TestId
   #define ProductId "PH.Check." + TestId
